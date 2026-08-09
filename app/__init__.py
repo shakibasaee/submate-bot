@@ -1,0 +1,1 @@
+"""Subtitle bot application package."""

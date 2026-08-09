@@ -62,6 +62,7 @@ class UserConversation:
     """The small amount of state needed before subtitle searching begins."""
 
     language: SubtitleLanguage | None = None
+    workflow_id: int = 0
     awaiting_title: bool = False
     selected_tmdb_id: int | None = None
     selected_media_type: MediaType | None = None
@@ -90,6 +91,7 @@ class ConversationStore:
         """Save a language choice and move the user to title entry."""
         conversation = self.get(user_id)
         conversation.language = language
+        conversation.workflow_id += 1
         conversation.awaiting_title = True
         conversation.selected_tmdb_id = None
         conversation.selected_media_type = None
@@ -108,25 +110,45 @@ class ConversationStore:
         self.get(user_id).language = language
 
     def cancel(self, user_id: int) -> None:
-        """End the active action while retaining the user's language choice."""
+        """Invalidate the entire active workflow while retaining its durable language."""
         conversation = self.get(user_id)
+        conversation.workflow_id += 1
         conversation.awaiting_title = False
+        conversation.selected_tmdb_id = None
+        conversation.selected_media_type = None
         conversation.search_results = None
         conversation.seasons = None
         conversation.episodes = None
+        conversation.selected_season_number = None
+        conversation.selected_episode_number = None
+        conversation.selected_title = None
+        conversation.subtitle_results = None
+        conversation.subtitle_offset = 0
+        conversation.selected_subtitle_file_id = None
 
-    def set_search_results(self, user_id: int, results: list[SearchResult]) -> None:
-        """Store only the choices shown to this user for callback validation."""
+    def is_active(self, user_id: int, workflow_id: int) -> bool:
+        """Return whether a callback or async result belongs to the current workflow."""
+        return self.get(user_id).workflow_id == workflow_id
+
+    def set_search_results(
+        self, user_id: int, workflow_id: int, results: list[SearchResult]
+    ) -> bool:
+        """Store displayed choices only when the originating workflow remains active."""
         conversation = self.get(user_id)
+        if conversation.workflow_id != workflow_id:
+            return False
         conversation.search_results = {
             (result.media_type, result.tmdb_id): result for result in results
         }
+        return True
 
     def select_result(
-        self, user_id: int, media_type: MediaType, tmdb_id: int
+        self, user_id: int, workflow_id: int, media_type: MediaType, tmdb_id: int
     ) -> SearchResult | None:
         """Select a result only if it appeared in this user's latest search."""
         conversation = self.get(user_id)
+        if conversation.workflow_id != workflow_id:
+            return None
         result = (conversation.search_results or {}).get((media_type, tmdb_id))
         if result is None:
             return None
@@ -137,31 +159,44 @@ class ConversationStore:
         conversation.search_results = None
         return result
 
-    def set_seasons(self, user_id: int, seasons: list[Season]) -> None:
-        """Save the selectable seasons returned for the chosen series."""
+    def set_seasons(self, user_id: int, workflow_id: int, seasons: list[Season]) -> bool:
+        """Save seasons only when the originating workflow remains active."""
         conversation = self.get(user_id)
+        if conversation.workflow_id != workflow_id:
+            return False
         conversation.seasons = {season.number: season for season in seasons}
         conversation.episodes = None
         conversation.selected_season_number = None
         conversation.selected_episode_number = None
+        return True
 
-    def select_season(self, user_id: int, number: int) -> Season | None:
+    def select_season(self, user_id: int, workflow_id: int, number: int) -> Season | None:
         """Select a displayed season and reject forged or expired choices."""
-        season = (self.get(user_id).seasons or {}).get(number)
+        conversation = self.get(user_id)
+        if conversation.workflow_id != workflow_id:
+            return None
+        season = (conversation.seasons or {}).get(number)
         if season is not None:
-            self.get(user_id).selected_season_number = number
+            conversation.selected_season_number = number
         return season
 
-    def set_episodes(self, user_id: int, episodes: list[Episode]) -> None:
-        """Save the selectable episodes from the selected season."""
-        self.get(user_id).episodes = {episode.number: episode for episode in episodes}
+    def set_episodes(self, user_id: int, workflow_id: int, episodes: list[Episode]) -> bool:
+        """Save episodes only when the originating workflow remains active."""
+        conversation = self.get(user_id)
+        if conversation.workflow_id != workflow_id:
+            return False
+        conversation.episodes = {episode.number: episode for episode in episodes}
+        return True
 
     def select_episode(
-        self, user_id: int, season_number: int, episode_number: int
+        self, user_id: int, workflow_id: int, season_number: int, episode_number: int
     ) -> Episode | None:
         """Save an episode only when it belongs to the active selected season."""
         conversation = self.get(user_id)
-        if conversation.selected_season_number != season_number:
+        if (
+            conversation.workflow_id != workflow_id
+            or conversation.selected_season_number != season_number
+        ):
             return None
         episode = (conversation.episodes or {}).get(episode_number)
         if episode is not None:
@@ -170,23 +205,35 @@ class ConversationStore:
             conversation.episodes = None
         return episode
 
-    def set_subtitle_results(self, user_id: int, results: list[SubtitleResult]) -> None:
-        """Save provider results so only displayed files can be selected."""
+    def set_subtitle_results(
+        self, user_id: int, workflow_id: int, results: list[SubtitleResult]
+    ) -> bool:
+        """Save provider results only when the originating workflow remains active."""
         conversation = self.get(user_id)
+        if conversation.workflow_id != workflow_id:
+            return False
         conversation.subtitle_results = {result.file_id: result for result in results}
         conversation.subtitle_offset = 0
+        conversation.selected_subtitle_file_id = None
+        return True
 
-    def select_subtitle(self, user_id: int, file_id: int) -> SubtitleResult | None:
-        """Store a selected provider file only when it was in the latest results."""
-        result = (self.get(user_id).subtitle_results or {}).get(file_id)
+    def select_subtitle(
+        self, user_id: int, workflow_id: int, file_id: int
+    ) -> SubtitleResult | None:
+        """Atomically consume one displayed subtitle, rejecting rapid duplicate clicks."""
+        conversation = self.get(user_id)
+        if conversation.workflow_id != workflow_id:
+            return None
+        result = (conversation.subtitle_results or {}).get(file_id)
         if result is not None:
-            self.get(user_id).selected_subtitle_file_id = file_id
+            conversation.selected_subtitle_file_id = file_id
+            conversation.subtitle_results = None
         return result
 
-    def back_to_seasons(self, user_id: int) -> bool:
+    def back_to_seasons(self, user_id: int, workflow_id: int) -> bool:
         """Discard an episode view and return to the latest valid season list."""
         conversation = self.get(user_id)
-        if not conversation.seasons:
+        if conversation.workflow_id != workflow_id or not conversation.seasons:
             return False
         conversation.episodes = None
         conversation.selected_season_number = None

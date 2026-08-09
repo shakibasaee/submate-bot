@@ -18,6 +18,12 @@ from aiogram.types import (
     Message,
 )
 
+from app.bot.presentation import (
+    remove_inline_keyboard,
+    safe_button_text,
+    safe_caption,
+    safe_html_text,
+)
 from app.bot.state import SubtitleResult, conversation_store
 from app.core.config import get_settings
 from app.core.infrastructure import infrastructure
@@ -63,9 +69,17 @@ def temporary_srt(content: bytes) -> Iterator[Path]:
         path.unlink(missing_ok=True)
 
 
-async def deliver_subtitle(message: Message, user_id: int, result: SubtitleResult) -> None:
+async def deliver_subtitle(
+    message: Message,
+    user_id: int,
+    workflow_id: int,
+    result: SubtitleResult,
+) -> None:
     """Retrieve, validate, send, and immediately delete a selected subtitle."""
     conversation = conversation_store.get(user_id)
+    if not conversation_store.is_active(user_id, workflow_id):
+        await message.answer("That subtitle selection has expired. Start again.")
+        return
     if result.format != "srt":
         await message.answer("That result is not an SRT file and cannot be delivered safely.")
         return
@@ -110,6 +124,10 @@ async def deliver_subtitle(message: Message, user_id: int, result: SubtitleResul
         await message.answer("Subtitle delivery failed safely. Please try again later.")
         return
 
+    if not conversation_store.is_active(user_id, workflow_id):
+        await message.answer("That subtitle delivery was cancelled.")
+        return
+
     language = str(conversation.language or "subtitle")
     filename = delivery_filename(
         conversation.selected_title or "subtitle",
@@ -118,13 +136,14 @@ async def deliver_subtitle(message: Message, user_id: int, result: SubtitleResul
         conversation.selected_episode_number,
     )
     uploader = f"\nUploader: {result.uploader}" if result.uploader else ""
+    caption = safe_caption(f"{PROVIDER_NOTICE}{uploader}")
     try:
         with temporary_srt(content) as path:
             document = FSInputFile(path, filename=filename)
             await retry_async(
                 lambda: message.answer_document(
                     document,
-                    caption=f"{PROVIDER_NOTICE}{uploader}",
+                    caption=caption,
                 ),
                 (TelegramNetworkError, TelegramServerError),
                 attempts=3,
@@ -145,26 +164,37 @@ def subtitle_label(result: SubtitleResult) -> str:
         labels.append(f"↓{result.download_count}")
     if result.rating is not None:
         labels.append(f"★{result.rating:g}")
-    return " — ".join(labels)
+    return safe_button_text(" — ".join(labels))
 
 
-def subtitle_keyboard(results: list[SubtitleResult], offset: int = 0) -> InlineKeyboardMarkup:
+def subtitle_keyboard(
+    results: list[SubtitleResult], workflow_id: int, offset: int = 0
+) -> InlineKeyboardMarkup:
     """Render a bounded page, with language change and cancellation controls."""
     page = results[offset : offset + PAGE_SIZE]
     rows = [
         [
             InlineKeyboardButton(
-                text=subtitle_label(result), callback_data=f"subtitle:{result.file_id}"
+                text=subtitle_label(result),
+                callback_data=f"subtitle:{workflow_id}:{result.file_id}",
             )
         ]
         for result in page
     ]
     if offset + PAGE_SIZE < len(results):
-        rows.append([InlineKeyboardButton(text="More results", callback_data="subtitle:more")])
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="More results", callback_data=f"subtitle:{workflow_id}:more"
+                )
+            ]
+        )
     rows.append(
         [
-            InlineKeyboardButton(text="Change language", callback_data="subtitle:language"),
-            InlineKeyboardButton(text="Cancel", callback_data="subtitle:cancel"),
+            InlineKeyboardButton(
+                text="Change language", callback_data=f"subtitle:{workflow_id}:language"
+            ),
+            InlineKeyboardButton(text="Cancel", callback_data=f"subtitle:{workflow_id}:cancel"),
         ]
     )
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -173,6 +203,7 @@ def subtitle_keyboard(results: list[SubtitleResult], offset: int = 0) -> InlineK
 async def search_subtitles(message: Message, user_id: int) -> None:
     """Search for the user's exact selected movie or TV episode."""
     conversation = conversation_store.get(user_id)
+    workflow_id = conversation.workflow_id
     settings = get_settings()
     key = settings.opensubtitles_api_key
     if key is None or key.get_secret_value().startswith("replace-"):
@@ -208,7 +239,9 @@ async def search_subtitles(message: Message, user_id: int) -> None:
             "No subtitles found. Try /language, search a different title, or try again later."
         )
         return
-    conversation_store.set_subtitle_results(user_id, results)
+    if not conversation_store.set_subtitle_results(user_id, workflow_id, results):
+        await message.answer("That subtitle search was cancelled. Start again when you are ready.")
+        return
     logger.info(
         "subtitle_search_completed",
         user_ref=user_reference(user_id),
@@ -218,8 +251,8 @@ async def search_subtitles(message: Message, user_id: int) -> None:
     language = "English" if str(conversation.language) == "en" else "Persian"
     title = conversation.selected_title or "this title"
     await message.answer(
-        f"Choose a subtitle version for {title}, {language}:",
-        reply_markup=subtitle_keyboard(results),
+        f"Choose a subtitle version for {safe_html_text(title, 500)}, {language}:",
+        reply_markup=subtitle_keyboard(results, workflow_id),
     )
 
 
@@ -229,11 +262,21 @@ async def subtitle_selected(callback: CallbackQuery) -> None:
     if callback.from_user is None or callback.data is None:
         await callback.answer()
         return
-    action = callback.data.removeprefix("subtitle:")
+    parts = callback.data.split(":", 2)
+    if len(parts) != 3 or not parts[1].isdigit():
+        await callback.answer("That subtitle selection is invalid.", show_alert=True)
+        return
+    workflow_id = int(parts[1])
+    action = parts[2]
+    if not conversation_store.is_active(callback.from_user.id, workflow_id):
+        await callback.answer("That subtitle result has expired. Search again.", show_alert=True)
+        return
     conversation = conversation_store.get(callback.from_user.id)
     if action == "cancel":
         conversation_store.cancel(callback.from_user.id)
         await callback.answer("Cancelled.")
+        if callback.message is not None:
+            await remove_inline_keyboard(callback.message)
         return
     if action == "language":
         await callback.answer()
@@ -243,23 +286,30 @@ async def subtitle_selected(callback: CallbackQuery) -> None:
     if action == "more":
         results = list((conversation.subtitle_results or {}).values())
         next_offset = conversation.subtitle_offset + PAGE_SIZE
-        if next_offset >= len(results) or callback.message is None:
+        if not results or next_offset >= len(results) or callback.message is None:
             await callback.answer("No more results.", show_alert=True)
             return
         conversation.subtitle_offset = next_offset
         await callback.answer()
+        await remove_inline_keyboard(callback.message)
         await callback.message.answer(
-            "More subtitle results:", reply_markup=subtitle_keyboard(results, next_offset)
+            "More subtitle results:",
+            reply_markup=subtitle_keyboard(results, workflow_id, next_offset),
         )
         return
     if not action.isdigit():
         await callback.answer("That subtitle selection is invalid.", show_alert=True)
         return
-    result = conversation_store.select_subtitle(callback.from_user.id, int(action))
+    result = conversation_store.select_subtitle(callback.from_user.id, workflow_id, int(action))
     if result is None:
         await callback.answer("That subtitle result has expired. Search again.", show_alert=True)
         return
     await callback.answer()
-    if isinstance(callback.message, Message):
-        await callback.message.answer(f"Selected: {subtitle_label(result)}. Preparing the file…")
-        await deliver_subtitle(callback.message, callback.from_user.id, result)
+    message = callback.message
+    if message is not None:
+        await remove_inline_keyboard(message)
+    if isinstance(message, Message):
+        await message.answer(
+            f"Selected: {safe_html_text(subtitle_label(result))}. Preparing the file…"
+        )
+        await deliver_subtitle(message, callback.from_user.id, workflow_id, result)

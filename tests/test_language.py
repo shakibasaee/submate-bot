@@ -78,13 +78,26 @@ def test_selection_confirms_language_and_prompts_for_title() -> None:
 
 def test_cancel_ends_action_without_changing_language() -> None:
     conversation_store.choose_language(7, SubtitleLanguage.ENGLISH)
+    conversation = conversation_store.get(7)
+    conversation.selected_tmdb_id = 123
+    conversation.selected_title = "Old title"
+    conversation.selected_season_number = 2
+    conversation.selected_episode_number = 5
+    conversation.selected_subtitle_file_id = 99
+    previous_workflow_id = conversation.workflow_id
     message = MessageStub(7)
 
     asyncio.run(cancel_command(message))
 
     conversation = conversation_store.get(7)
     assert conversation.language is SubtitleLanguage.ENGLISH
+    assert conversation.workflow_id > previous_workflow_id
     assert conversation.awaiting_title is False
+    assert conversation.selected_tmdb_id is None
+    assert conversation.selected_title is None
+    assert conversation.selected_season_number is None
+    assert conversation.selected_episode_number is None
+    assert conversation.selected_subtitle_file_id is None
     assert "cancelled" in message.answer.await_args.args[0]
 
 

@@ -90,7 +90,8 @@ def test_valid_srt_is_sent_then_immediately_deleted(monkeypatch: pytest.MonkeyPa
     conversation = conversation_store.get(7)
     conversation.language = SubtitleLanguage.ENGLISH
     conversation.selected_title = "Inception"
-    result = SubtitleResult(42, "WEBRip", "srt", False, 10, 8.0, "uploader")
+    workflow_id = conversation.workflow_id
+    result = SubtitleResult(42, "WEBRip", "srt", False, 10, 8.0, "<b>uploader</b>")
     delivered_path: Path | None = None
 
     async def capture_document(document: object, *, caption: str) -> None:
@@ -99,13 +100,15 @@ def test_valid_srt_is_sent_then_immediately_deleted(monkeypatch: pytest.MonkeyPa
         assert delivered_path.exists()
         assert document.filename == "Inception-en.srt"  # type: ignore[attr-defined]
         assert "OpenSubtitles.com" in caption
+        assert "&lt;b&gt;uploader&lt;/b&gt;" in caption
+        assert "<b>uploader</b>" not in caption
 
     message = SimpleNamespace(
         answer=AsyncMock(),
         answer_document=AsyncMock(side_effect=capture_document),
     )
 
-    asyncio.run(deliver_subtitle(message, 7, result))  # type: ignore[arg-type]
+    asyncio.run(deliver_subtitle(message, 7, workflow_id, result))  # type: ignore[arg-type]
 
     assert delivered_path is not None
     assert not delivered_path.exists()

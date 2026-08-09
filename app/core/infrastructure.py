@@ -43,7 +43,7 @@ class Infrastructure:
 
     def __init__(self) -> None:
         self.redis: redis.Redis | None = None
-        self.postgres: AsyncConnectionPool | None = None
+        self.postgres: AsyncConnectionPool[Any] | None = None
         self._memory_preferences: dict[int, str] = {}
         self._memory_limits: dict[str, tuple[int, int]] = {}
         self._limit_lock = asyncio.Lock()
@@ -98,7 +98,7 @@ class Infrastructure:
             logger.info("postgres_disabled")
             return
         self._postgres_configured = True
-        pool = AsyncConnectionPool(
+        pool: AsyncConnectionPool[Any] = AsyncConnectionPool(
             settings.database_url.get_secret_value(),
             min_size=1,
             max_size=5,
@@ -130,11 +130,12 @@ class Infrastructure:
     async def save_language(self, user_id: int, language: str) -> None:
         """Persist only the Telegram ID and selected subtitle language."""
         self._memory_preferences[user_id] = language
-        if self.postgres is None:
+        postgres = self.postgres
+        if postgres is None:
             return
 
         async def save() -> None:
-            async with self.postgres.connection(timeout=3) as connection:
+            async with postgres.connection(timeout=3) as connection:
                 await connection.execute(
                     """
                     INSERT INTO user_preferences (telegram_user_id, subtitle_language)
@@ -153,10 +154,11 @@ class Infrastructure:
 
     async def load_language(self, user_id: int) -> str | None:
         """Load a preference from PostgreSQL, falling back to process memory."""
-        if self.postgres is not None:
+        postgres = self.postgres
+        if postgres is not None:
 
             async def load() -> tuple[object, ...] | None:
-                async with self.postgres.connection(timeout=3) as connection:
+                async with postgres.connection(timeout=3) as connection:
                     cursor = await connection.execute(
                         "SELECT subtitle_language FROM user_preferences "
                         "WHERE telegram_user_id = %s",
@@ -176,11 +178,15 @@ class Infrastructure:
 
     async def cache_get(self, key: str) -> Any | None:
         """Read JSON from Redis; a failure behaves exactly like a cache miss."""
-        if self.redis is None:
+        redis_client = self.redis
+        if redis_client is None:
             return None
 
         async def get() -> str | None:
-            return await self.redis.get(key)
+            value = await redis_client.get(key)
+            if isinstance(value, bytes):
+                return value.decode("utf-8")
+            return value
 
         try:
             value = await retry_async(get, (RedisError, TimeoutError), attempts=2)
@@ -192,11 +198,12 @@ class Infrastructure:
 
     async def cache_set(self, key: str, value: Any, ttl_seconds: int) -> None:
         """Write expiring JSON to Redis and ignore cache-only failures."""
-        if self.redis is None or ttl_seconds <= 0:
+        redis_client = self.redis
+        if redis_client is None or ttl_seconds <= 0:
             return
 
         async def set_value() -> None:
-            await self.redis.set(
+            await redis_client.set(
                 key,
                 json.dumps(value, ensure_ascii=False, separators=(",", ":")),
                 ex=ttl_seconds,

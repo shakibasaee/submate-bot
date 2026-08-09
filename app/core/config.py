@@ -72,4 +72,5 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     """Return a cached settings instance for the current process."""
-    return Settings()
+    # BaseSettings supplies required values from environment sources at runtime.
+    return Settings()  # pyright: ignore[reportCallIssue]

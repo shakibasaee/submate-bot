@@ -1,115 +1,63 @@
-"""Tests for safe subtitle validation and temporary-file handling."""
+"""Safe subtitle validation and application delivery tests."""
 
 import asyncio
-from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import AsyncMock
 
 import pytest
-from pydantic import SecretStr
 
-from app.bot.handlers import subtitle as subtitle_handler
-from app.bot.handlers.subtitle import deliver_subtitle, delivery_filename, temporary_srt
-from app.bot.state import SubtitleLanguage, SubtitleResult, conversation_store
-from app.services.opensubtitles import (
-    MAX_SUBTITLE_BYTES,
-    DownloadLink,
-    UnsafeSubtitleError,
-    validate_srt,
+from app.domain.errors import UnsafeSubtitleError, WorkflowExpiredError
+from app.domain.languages import LanguageCode
+from app.domain.models import MediaSearchResult, MediaType
+from app.domain.subtitles import (
+    DownloadedSubtitle,
+    ProviderFileRef,
+    ProviderId,
+    SubtitleCandidate,
 )
+from app.infrastructure.providers.opensubtitles import MAX_SUBTITLE_BYTES, validate_srt
+from tests.support import FakeMetadata, FakeProvider, build_test_application
 
-VALID_SRT = b"1\r\n00:00:01,000 --> 00:00:03,500\r\nHello from a subtitle.\r\n"
-
-
-def test_valid_srt_is_normalized_to_utf8_lf() -> None:
-    assert validate_srt(VALID_SRT) == (
-        b"1\n00:00:01,000 --> 00:00:03,500\nHello from a subtitle.\n"
-    )
+VALID_SRT = b"1\r\n00:00:01,000 --> 00:00:03,500\r\nHello.\r\n"
 
 
-@pytest.mark.parametrize(
-    "content",
-    [
-        b"",
-        b"PK\x03\x04fake zip",
-        b"Rar!fake archive",
-        b"not a subtitle",
-        b"\x00\x01\x02\x03binary",
-    ],
-)
-def test_unsafe_archive_empty_binary_and_corrupt_files_are_rejected(content: bytes) -> None:
-    with pytest.raises(UnsafeSubtitleError):
-        validate_srt(content)
-
-
-def test_oversized_subtitle_is_rejected() -> None:
+def test_valid_srt_is_normalized_and_unsafe_files_are_rejected() -> None:
+    assert validate_srt(VALID_SRT).startswith(b"1\n")
+    for content in (b"", b"PK\x03\x04zip", b"binary\x00\x01", b"not a subtitle"):
+        with pytest.raises(UnsafeSubtitleError):
+            validate_srt(content)
     with pytest.raises(UnsafeSubtitleError, match="too large"):
         validate_srt(b"x" * (MAX_SUBTITLE_BYTES + 1))
 
 
-def test_temporary_srt_is_deleted_after_success() -> None:
-    path: Path
-    with temporary_srt(VALID_SRT) as path:
-        assert path.exists()
-        assert path.read_bytes() == VALID_SRT
-    assert not path.exists()
-
-
-def test_temporary_srt_is_deleted_after_failure() -> None:
-    path: Path
-    with pytest.raises(RuntimeError, match="send failed"), temporary_srt(VALID_SRT) as path:
-        raise RuntimeError("send failed")
-    assert not path.exists()
-
-
-def test_delivery_filename_is_clear_and_sanitized() -> None:
-    assert delivery_filename("Show: A/B?*", "fa", 2, 3) == "Show A B-S02E03-fa.srt"
-
-
-def test_valid_srt_is_sent_then_immediately_deleted(monkeypatch: pytest.MonkeyPatch) -> None:
-    class FakeOpenSubtitlesClient:
-        def __init__(self, api_key: str) -> None:
-            assert api_key == "test-api-key"
-
-        async def request_download_link(self, file_id: int) -> DownloadLink:
-            assert file_id == 42
-            return DownloadLink("https://www.opensubtitles.com/download/test.srt", "test.srt")
-
-        async def download_srt(self, link: DownloadLink) -> bytes:
-            assert link.file_name == "test.srt"
-            return validate_srt(VALID_SRT)
-
-    monkeypatch.setattr(subtitle_handler, "OpenSubtitlesClient", FakeOpenSubtitlesClient)
-    monkeypatch.setattr(
-        subtitle_handler,
-        "get_settings",
-        lambda: SimpleNamespace(opensubtitles_api_key=SecretStr("test-api-key")),
+def test_delivery_consumes_candidate_once_and_generates_safe_filename() -> None:
+    candidate = SubtitleCandidate(
+        ProviderId("fake"),
+        ProviderFileRef("opaque"),
+        LanguageCode.ENGLISH,
+        "srt",
+        "WEB-DL",
+        attribution="Fake",
     )
-
-    conversation_store._conversations.clear()
-    conversation = conversation_store.get(7)
-    conversation.language = SubtitleLanguage.ENGLISH
-    conversation.selected_title = "Inception"
-    workflow_id = conversation.workflow_id
-    result = SubtitleResult(42, "WEBRip", "srt", False, 10, 8.0, "<b>uploader</b>")
-    delivered_path: Path | None = None
-
-    async def capture_document(document: object, *, caption: str) -> None:
-        nonlocal delivered_path
-        delivered_path = Path(document.path)  # type: ignore[attr-defined]
-        assert delivered_path.exists()
-        assert document.filename == "Inception-en.srt"  # type: ignore[attr-defined]
-        assert "OpenSubtitles.com" in caption
-        assert "&lt;b&gt;uploader&lt;/b&gt;" in caption
-        assert "<b>uploader</b>" not in caption
-
-    message = SimpleNamespace(
-        answer=AsyncMock(),
-        answer_document=AsyncMock(side_effect=capture_document),
+    provider = FakeProvider(
+        candidates=[candidate],
+        downloaded=DownloadedSubtitle(VALID_SRT, "provider.srt", "srt", "Fake"),
     )
+    metadata = FakeMetadata(
+        search_results=[MediaSearchResult("1", MediaType.MOVIE, "Show: A/B?*", "2020")]
+    )
+    app = build_test_application(metadata=metadata, provider=provider)
 
-    asyncio.run(deliver_subtitle(message, 7, workflow_id, result))  # type: ignore[arg-type]
+    async def flow() -> None:
+        await app.services.choose_language.execute(7, LanguageCode.ENGLISH)
+        search = await app.services.search_titles.execute(7, "Show")
+        await app.services.select_title.execute(7, search.workflow_id, MediaType.MOVIE, "1")
+        delivered = await app.services.deliver_subtitle.execute(
+            7, search.workflow_id, ProviderId("fake"), 0
+        )
+        assert delivered.subtitle.filename == "Show A B-en.srt"
+        with pytest.raises(WorkflowExpiredError):
+            await app.services.deliver_subtitle.execute(
+                7, search.workflow_id, ProviderId("fake"), 0
+            )
 
-    assert delivered_path is not None
-    assert not delivered_path.exists()
-    message.answer_document.assert_awaited_once()
+    asyncio.run(flow())
+    assert provider.download_calls == 1

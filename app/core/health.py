@@ -1,10 +1,11 @@
 """Lightweight liveness, readiness, and metrics HTTP server."""
 
+from collections.abc import Awaitable, Callable
+
 import structlog
 from aiohttp import web
 
 from app.core.config import Settings
-from app.core.infrastructure import infrastructure
 from app.core.monitoring import monitoring
 
 logger = structlog.get_logger(__name__)
@@ -13,7 +14,11 @@ logger = structlog.get_logger(__name__)
 class HealthServer:
     """Expose probes without including configuration values or secrets."""
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        dependency_health: Callable[[], Awaitable[dict[str, str | bool]]],
+    ) -> None:
         self.host = settings.health_host
         self.port = settings.health_port
         self.providers_configured = {
@@ -22,13 +27,14 @@ class HealthServer:
             "opensubtitles": settings.opensubtitles_api_key is not None
             and not settings.opensubtitles_api_key.get_secret_value().startswith("replace-"),
         }
+        self._dependency_health = dependency_health
         self._runner: web.AppRunner | None = None
 
     async def live(self, _request: web.Request) -> web.Response:
         return web.json_response({"status": "ok"})
 
     async def ready(self, _request: web.Request) -> web.Response:
-        dependency_health = await infrastructure.health()
+        dependency_health = await self._dependency_health()
         providers_ready = all(self.providers_configured.values())
         ready = dependency_health.pop("ready") and providers_ready
         payload = {

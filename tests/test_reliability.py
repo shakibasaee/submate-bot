@@ -9,7 +9,6 @@ import structlog
 from app.bot.handlers.privacy import PRIVACY_NOTICE, privacy_command
 from app.core.config import Settings
 from app.core.health import HealthServer
-from app.core.infrastructure import Infrastructure
 from app.core.logging import configure_logging, redact_sensitive, user_reference
 from app.core.monitoring import Monitoring
 from app.core.retry import retry_async
@@ -79,24 +78,13 @@ def test_user_log_reference_does_not_expose_telegram_id() -> None:
     assert len(reference) == 12
 
 
-def test_dependency_health_reports_configured_failures() -> None:
-    service = Infrastructure()
-    service._redis_configured = True
-    service._postgres_configured = True
-
-    health = asyncio.run(service.health())
-
-    assert health == {"redis": "unavailable", "postgres": "unavailable", "ready": False}
-
-
-def test_readiness_requires_provider_configuration(monkeypatch: object) -> None:
+def test_readiness_requires_provider_configuration() -> None:
     settings = Settings(telegram_bot_token="123456:abcdefghijklmnopqrstuvwxyz")
-    server = HealthServer(settings)
 
     async def healthy() -> dict[str, str | bool]:
         return {"redis": "disabled", "postgres": "disabled", "ready": True}
 
-    monkeypatch.setattr("app.core.health.infrastructure.health", healthy)  # type: ignore[attr-defined]
+    server = HealthServer(settings, healthy)
     response = asyncio.run(server.ready(None))  # type: ignore[arg-type]
     payload = json.loads(response.text)
 

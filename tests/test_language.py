@@ -1,110 +1,40 @@
-"""Tests for language selection and user-scoped conversation state."""
+"""Language preference and workflow reset tests."""
 
 import asyncio
-from unittest.mock import AsyncMock
 
-import pytest
-
-from app.bot.handlers.language import (
-    LANGUAGE_PROMPT,
-    TITLE_PROMPT,
-    cancel_command,
-    language_command,
-    language_selected,
-)
-from app.bot.handlers.start import start_command
-from app.bot.state import ConversationStore, SubtitleLanguage, conversation_store
+from app.application.dto import WorkflowStage
+from app.domain.languages import LanguageCode
+from tests.support import build_test_application
 
 
-class User:
-    def __init__(self, user_id: int) -> None:
-        self.id = user_id
+def test_language_selection_is_durable_but_workflow_state_is_temporary() -> None:
+    app = build_test_application()
+
+    async def scenario() -> None:
+        selected = await app.services.choose_language.execute(42, LanguageCode.PERSIAN)
+        conversation = await app.conversations.get(42)
+        assert conversation.stage is WorkflowStage.AWAITING_TITLE
+        assert conversation.language is LanguageCode.PERSIAN
+
+        await app.services.cancel_workflow.execute(42)
+        cancelled = await app.conversations.get(42)
+        assert cancelled.workflow_id != selected.workflow_id
+        assert cancelled.stage is WorkflowStage.IDLE
+        assert cancelled.language is LanguageCode.PERSIAN
+        assert await app.preferences.get_language(42) is LanguageCode.PERSIAN
+
+    asyncio.run(scenario())
 
 
-class MessageStub:
-    def __init__(self, user_id: int = 1) -> None:
-        self.from_user = User(user_id)
-        self.answer = AsyncMock()
+def test_start_restores_preference_and_invalidates_old_workflow() -> None:
+    app = build_test_application()
 
+    async def scenario() -> None:
+        old = await app.services.choose_language.execute(7, LanguageCode.ENGLISH)
+        started = await app.services.start_search.execute(7)
+        current = await app.conversations.get(7)
+        assert started.language is LanguageCode.ENGLISH
+        assert current.language is LanguageCode.ENGLISH
+        assert current.workflow_id != old.workflow_id
 
-class CallbackStub:
-    def __init__(self, user_id: int, data: str) -> None:
-        self.from_user = User(user_id)
-        self.data = data
-        self.answer = AsyncMock()
-        self.message = MessageStub(user_id)
-
-
-@pytest.fixture(autouse=True)
-def clear_conversations() -> None:
-    conversation_store._conversations.clear()
-
-
-def test_start_shows_the_two_language_buttons() -> None:
-    message = MessageStub()
-
-    asyncio.run(start_command(message))
-
-    assert message.answer.await_args.args[0] == LANGUAGE_PROMPT
-    keyboard = message.answer.await_args.kwargs["reply_markup"]
-    assert [row[0].text for row in keyboard.inline_keyboard] == ["English", "فارسی"]
-    assert [row[0].callback_data for row in keyboard.inline_keyboard] == [
-        "language:en",
-        "language:fa",
-    ]
-
-
-def test_language_command_shows_picker() -> None:
-    message = MessageStub()
-
-    asyncio.run(language_command(message))
-
-    assert message.answer.await_args.args[0] == LANGUAGE_PROMPT
-
-
-def test_selection_confirms_language_and_prompts_for_title() -> None:
-    callback = CallbackStub(42, "language:fa")
-
-    asyncio.run(language_selected(callback))
-
-    assert callback.answer.await_args.args[0] == "Language set to فارسی."
-    assert callback.message.answer.await_args.args[0] == (
-        f"Language set to فارسی.\n\n{TITLE_PROMPT}"
-    )
-    conversation = conversation_store.get(42)
-    assert conversation.language is SubtitleLanguage.PERSIAN
-    assert conversation.awaiting_title is True
-
-
-def test_cancel_ends_action_without_changing_language() -> None:
-    conversation_store.choose_language(7, SubtitleLanguage.ENGLISH)
-    conversation = conversation_store.get(7)
-    conversation.selected_tmdb_id = 123
-    conversation.selected_title = "Old title"
-    conversation.selected_season_number = 2
-    conversation.selected_episode_number = 5
-    conversation.selected_subtitle_file_id = 99
-    previous_workflow_id = conversation.workflow_id
-    message = MessageStub(7)
-
-    asyncio.run(cancel_command(message))
-
-    conversation = conversation_store.get(7)
-    assert conversation.language is SubtitleLanguage.ENGLISH
-    assert conversation.workflow_id > previous_workflow_id
-    assert conversation.awaiting_title is False
-    assert conversation.selected_tmdb_id is None
-    assert conversation.selected_title is None
-    assert conversation.selected_season_number is None
-    assert conversation.selected_episode_number is None
-    assert conversation.selected_subtitle_file_id is None
-    assert "cancelled" in message.answer.await_args.args[0]
-
-
-def test_conversation_store_keeps_each_user_separate() -> None:
-    store = ConversationStore()
-    store.choose_language(1, SubtitleLanguage.ENGLISH)
-    store.choose_language(2, SubtitleLanguage.PERSIAN)
-
-    assert store.get(1).language is SubtitleLanguage.ENGLISH
-    assert store.get(2).language is SubtitleLanguage.PERSIAN
+    asyncio.run(scenario())

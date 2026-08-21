@@ -2,6 +2,10 @@
 
 A Telegram bot that will search approved subtitle providers and send selected subtitle files.
 
+The codebase uses domain/application/adapter boundaries with injected infrastructure
+and a single shared HTTP lifecycle. See [ARCHITECTURE.md](ARCHITECTURE.md) for the
+dependency diagram and enforced layer rules.
+
 ## Phase 1: run locally
 
 1. Create a bot with [@BotFather](https://t.me/BotFather) and copy its token.
@@ -48,8 +52,8 @@ returns to the season picker and Cancel ends the current action.
 
 Add `OPENSUBTITLES_API_KEY` to `.env` to enable subtitle search. The bot shows
 ranked, paged OpenSubtitles choices. A selected `.srt` is retrieved through a
-temporary provider link, size- and format-validated, sent as a Telegram document,
-and deleted from local temporary storage immediately after the send completes.
+temporary provider link, size- and format-validated, and sent as a Telegram
+document from memory without writing a local subtitle file.
 Archives and non-SRT content are rejected. Delivery messages attribute
 OpenSubtitles and the uploader when one is supplied.
 

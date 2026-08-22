@@ -34,7 +34,7 @@ testpaths = ["tests"]
 addopts = "-q"
 
 [tool.pyright]
-include = ["app"]
+include = ["app", "scripts"]
 pythonVersion = "3.12"
 typeCheckingMode = "standard"
 reportMissingTypeStubs = "none"

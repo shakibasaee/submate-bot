@@ -32,8 +32,6 @@ PyYAML==6.0.3
 redis==8.1.0
 ruff==0.16.2
 structlog==25.5.0
-# Editable Git install with no remote (subtitle-telegram-bot==0.1.0)
--e c:\users\nitro 5\documents\to le
 typing-inspection==0.4.2
 typing_extensions==4.16.0
 tzdata==2026.3

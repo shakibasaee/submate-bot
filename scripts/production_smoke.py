@@ -38,7 +38,12 @@ def providers_are_configured(settings: Settings) -> bool:
     """Return whether both providers have non-placeholder credentials."""
     return all(
         secret is not None and not secret.get_secret_value().startswith("replace-")
-        for secret in (settings.tmdb_api_key, settings.opensubtitles_api_key)
+        for secret in (
+            settings.tmdb_api_key,
+            settings.opensubtitles_api_key,
+            settings.opensubtitles_username,
+            settings.opensubtitles_password,
+        )
     )
 
 

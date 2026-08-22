@@ -33,6 +33,8 @@ def smoke_settings() -> Settings:
         telegram_bot_token=VALID_TOKEN,
         tmdb_api_key="test-tmdb-key",
         opensubtitles_api_key="test-opensubtitles-key",
+        opensubtitles_username="test-opensubtitles-user",
+        opensubtitles_password="test-opensubtitles-password",
         database_url=None,
         redis_url=None,
     )
@@ -45,6 +47,17 @@ def test_smoke_module_uses_the_current_composition_root() -> None:
 
     assert "app.core.infrastructure" not in source
     assert runtime_default is build_runtime
+
+
+def test_smoke_requires_opensubtitles_download_credentials() -> None:
+    settings = Settings(
+        telegram_bot_token=VALID_TOKEN,
+        tmdb_api_key="test-tmdb-key",
+        opensubtitles_api_key="test-opensubtitles-key",
+    )
+
+    assert not production_smoke.providers_are_configured(settings)
+    assert production_smoke.providers_are_configured(smoke_settings())
 
 
 def test_smoke_constructs_and_closes_the_real_runtime_without_network() -> None:

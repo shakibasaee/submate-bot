@@ -35,11 +35,41 @@ class ProviderError(ApplicationError):
     pass
 
 
-class ProviderQuotaError(ProviderError):
+class ProviderAuthenticationError(ProviderError):
     pass
 
 
-class ProviderLinkError(ProviderError):
+class ProviderRateLimitError(ProviderError):
+    def __init__(self, message: str, retry_after: int | None = None) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
+class ProviderQuotaError(ProviderRateLimitError):
+    pass
+
+
+class ProviderTimeoutError(ProviderError):
+    pass
+
+
+class ProviderUnavailableError(ProviderError):
+    pass
+
+
+class ProviderNotFoundError(ProviderError):
+    pass
+
+
+class ProviderResponseError(ProviderError):
+    pass
+
+
+class ProviderConfigurationError(ConfigurationError):
+    pass
+
+
+class ProviderLinkError(ProviderResponseError):
     pass
 
 

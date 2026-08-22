@@ -10,7 +10,9 @@ import structlog
 
 SENSITIVE_KEY_PARTS = (
     "token",
+    "authorization",
     "api_key",
+    "username",
     "password",
     "secret",
     "database_url",

@@ -50,12 +50,16 @@ def test_sensitive_log_fields_and_embedded_credentials_are_redacted() -> None:
         {
             "event": f"request failed near {token}",
             "api_key": "private",
+            "authorization": "Bearer private-token",
+            "username": "private-user",
             "query": "private movie title",
             "database": "postgresql://user:password@database/app",
         },
     )
 
     assert event["api_key"] == "[REDACTED]"
+    assert event["authorization"] == "[REDACTED]"
+    assert event["username"] == "[REDACTED]"
     assert event["query"] == "[REDACTED]"
     assert token not in event["event"]
     assert "password" not in event["database"]

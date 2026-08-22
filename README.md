@@ -50,10 +50,11 @@ For TV series, the bot loads available TMDb seasons, deliberately excludes
 Specials (Season 0), and then loads the episodes for the selected season. Back
 returns to the season picker and Cancel ends the current action.
 
-Add `OPENSUBTITLES_API_KEY` to `.env` to enable subtitle search. The bot shows
-ranked, paged OpenSubtitles choices. A selected `.srt` is retrieved through a
-temporary provider link, size- and format-validated, and sent as a Telegram
-document from memory without writing a local subtitle file.
+Add `OPENSUBTITLES_API_KEY`, `OPENSUBTITLES_USERNAME`, and
+`OPENSUBTITLES_PASSWORD` to `.env` to enable authenticated subtitle downloads.
+The bot shows ranked, paged OpenSubtitles choices. A selected `.srt` is retrieved
+through a temporary provider link, size- and format-validated, and sent as a
+Telegram document from memory without writing a local subtitle file.
 Archives and non-SRT content are rejected. Delivery messages attribute
 OpenSubtitles and the uploader when one is supplied.
 

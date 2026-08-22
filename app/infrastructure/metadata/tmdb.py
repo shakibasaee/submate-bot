@@ -67,9 +67,11 @@ def map_episodes(payload: dict[str, object], series: SeriesRef) -> list[EpisodeR
     if not isinstance(season_number, int) or season_number < 1:
         return []
     return [
-        EpisodeRef(series, season_number, number, name.strip())
+        EpisodeRef(str(external_id), series, season_number, number, name.strip())
         for item in raw
         if isinstance(item, dict)
+        and isinstance(external_id := item.get("id"), int)
+        and not isinstance(external_id, bool)
         and isinstance(number := item.get("episode_number"), int)
         and number > 0
         and isinstance(name := item.get("name"), str)
@@ -167,12 +169,18 @@ class TmdbMetadataGateway:
         return results
 
     async def episodes(self, series: SeriesRef, season_number: int) -> list[EpisodeRef]:
-        key = f"tmdb:episodes:v2:{series.external_id}:{season_number}"
+        key = f"tmdb:episodes:v3:{series.external_id}:{season_number}"
         cached = await self._cache.get(key)
         if isinstance(cached, list):
             try:
                 return [
-                    EpisodeRef(series, season_number, int(x["number"]), str(x["name"]))
+                    EpisodeRef(
+                        str(x["external_id"]),
+                        series,
+                        season_number,
+                        int(x["number"]),
+                        str(x["name"]),
+                    )
                     for x in cached
                 ]
             except (KeyError, TypeError, ValueError):
@@ -182,7 +190,14 @@ class TmdbMetadataGateway:
         results = map_episodes(payload, series)
         await self._cache.set(
             key,
-            [{"number": item.episode_number, "name": item.name} for item in results],
+            [
+                {
+                    "external_id": item.external_id,
+                    "number": item.episode_number,
+                    "name": item.name,
+                }
+                for item in results
+            ],
             self._cache_ttl,
         )
         return results

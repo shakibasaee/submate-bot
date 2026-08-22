@@ -26,11 +26,17 @@ def test_season_zero_is_excluded_and_episode_numbers_are_preserved() -> None:
     )
     series = SeriesRef("2", "Series")
     episodes = map_episodes(
-        {"season_number": 2, "episodes": [{"episode_number": 3, "name": "Finale"}]},
+        {
+            "season_number": 2,
+            "episodes": [{"id": 203, "episode_number": 3, "name": "Finale"}],
+        },
         series,
     )
     assert [item.number for item in seasons] == [2]
-    assert [(item.season_number, item.episode_number) for item in episodes] == [(2, 3)]
+    assert [
+        (item.external_id, item.series.external_id, item.season_number, item.episode_number)
+        for item in episodes
+    ] == [("203", "2", 2, 3)]
 
 
 def test_callback_data_carries_opaque_workflow_and_external_ids() -> None:

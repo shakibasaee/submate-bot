@@ -65,7 +65,7 @@ def test_movie_flow_reaches_provider_neutral_delivery() -> None:
 
 def test_tv_flow_requires_and_preserves_exact_season_episode_coordinates() -> None:
     series = SeriesRef("1396", "Example Series", "2008")
-    episode = EpisodeRef(series, 2, 5, "Episode Five")
+    episode = EpisodeRef("62085", series, 2, 5, "Episode Five")
     metadata = FakeMetadata(
         search_results=[MediaSearchResult("1396", MediaType.TV, series.title, series.year)],
         season_results=[SeasonSummary(2, "Season 2")],

@@ -10,12 +10,14 @@ from app.domain.subtitles import ProviderFileRef, ProviderId, SubtitleCandidate,
 def test_movie_and_episode_queries_are_distinct_complete_types() -> None:
     movie_query = SubtitleQuery(MovieRef("1", "Movie"), LanguageCode.ENGLISH)
     series = SeriesRef("2", "Series")
-    episode_query = SubtitleQuery(EpisodeRef(series, 2, 5, "Episode"), LanguageCode.PERSIAN)
+    episode_query = SubtitleQuery(EpisodeRef("205", series, 2, 5, "Episode"), LanguageCode.PERSIAN)
     assert isinstance(movie_query.media, MovieRef)
     assert isinstance(episode_query.media, EpisodeRef)
     assert episode_query.media.season_number == 2
     with pytest.raises(ValueError):
-        EpisodeRef(series, 0, 5, "Invalid")
+        EpisodeRef("205", series, 0, 5, "Invalid")
+    with pytest.raises(ValueError):
+        EpisodeRef("", series, 2, 5, "Invalid")
 
 
 def test_candidates_use_opaque_provider_scoped_references_and_value_equality() -> None:

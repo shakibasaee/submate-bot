@@ -37,7 +37,9 @@ async def authenticate_telegram(token: str) -> int:
 def providers_are_configured(settings: Settings) -> bool:
     """Return whether both providers have non-placeholder credentials."""
     return all(
-        secret is not None and not secret.get_secret_value().startswith("replace-")
+        secret is not None
+        and bool(secret.get_secret_value().strip())
+        and not secret.get_secret_value().strip().startswith("replace-")
         for secret in (
             settings.tmdb_api_key,
             settings.opensubtitles_api_key,

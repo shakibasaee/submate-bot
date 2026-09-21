@@ -60,6 +60,14 @@ def test_smoke_requires_opensubtitles_download_credentials() -> None:
     assert production_smoke.providers_are_configured(smoke_settings())
 
 
+@pytest.mark.parametrize("value", ["", "   ", " replace-password "])
+def test_smoke_rejects_blank_or_placeholder_download_credentials(value: str) -> None:
+    from pydantic import SecretStr
+
+    settings = smoke_settings().model_copy(update={"opensubtitles_password": SecretStr(value)})
+    assert not production_smoke.providers_are_configured(settings)
+
+
 def test_smoke_constructs_and_closes_the_real_runtime_without_network() -> None:
     settings = smoke_settings()
     created: list[ApplicationRuntime] = []

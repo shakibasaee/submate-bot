@@ -46,11 +46,14 @@ class SeasonSummary:
 
 @dataclass(frozen=True, slots=True)
 class EpisodeRef:
+    external_id: str
     series: SeriesRef
     season_number: int
     episode_number: int
     name: str
 
     def __post_init__(self) -> None:
+        if not self.external_id:
+            raise ValueError("episode external ID must not be empty")
         if self.season_number < 1 or self.episode_number < 1:
             raise ValueError("season and episode numbers must be positive")

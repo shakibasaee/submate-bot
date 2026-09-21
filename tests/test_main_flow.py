@@ -65,13 +65,16 @@ def test_movie_flow_reaches_provider_neutral_delivery() -> None:
 
 def test_tv_flow_requires_and_preserves_exact_season_episode_coordinates() -> None:
     series = SeriesRef("1396", "Example Series", "2008")
-    episode = EpisodeRef(series, 2, 5, "Episode Five")
+    episode = EpisodeRef("62085", series, 2, 5, "Episode Five")
     metadata = FakeMetadata(
         search_results=[MediaSearchResult("1396", MediaType.TV, series.title, series.year)],
         season_results=[SeasonSummary(2, "Season 2")],
         episode_results=[episode],
     )
-    provider = FakeProvider(candidates=[candidate(LanguageCode.PERSIAN)])
+    provider = FakeProvider(
+        candidates=[candidate(LanguageCode.PERSIAN)],
+        downloaded=DownloadedSubtitle(VALID_SRT, "provider.srt", "srt", "Fake provider"),
+    )
     app = build_test_application(metadata=metadata, provider=provider)
 
     async def flow() -> None:
@@ -83,8 +86,14 @@ def test_tv_flow_requires_and_preserves_exact_season_episode_coordinates() -> No
         assert episodes.episodes == (episode,)
         selected = await app.services.navigate_series.select_episode(2, search.workflow_id, 2, 5)
         assert selected.episode == episode
+        delivery = await app.services.deliver_subtitle.execute(
+            2, search.workflow_id, ProviderId("fake"), 0
+        )
+        assert delivery.subtitle.filename == "Example Series-S02E05-fa.srt"
+        assert delivery.subtitle.content == VALID_SRT
 
     asyncio.run(flow())
     query = provider.search_queries[0]
     assert isinstance(query.media, EpisodeRef)
     assert (query.media.season_number, query.media.episode_number) == (2, 5)
+    assert provider.download_calls == 1

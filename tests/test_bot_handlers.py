@@ -140,7 +140,7 @@ def test_tv_callbacks_navigate_season_episode_and_show_subtitles() -> None:
     metadata = FakeMetadata(
         search_results=[MediaSearchResult("2", MediaType.TV, "Series", "2020")],
         season_results=[SeasonSummary(2, "Season 2")],
-        episode_results=[EpisodeRef(series, 2, 3, "Episode <Three>")],
+        episode_results=[EpisodeRef("203", series, 2, 3, "Episode <Three>")],
     )
     provider = FakeProvider(
         candidates=[

@@ -183,6 +183,16 @@ async def build_runtime(settings: Settings) -> ApplicationRuntime:
                     session,
                     opensubtitles_key.get_secret_value(),
                     cache,
+                    username=(
+                        settings.opensubtitles_username.get_secret_value()
+                        if settings.opensubtitles_username is not None
+                        else None
+                    ),
+                    password=(
+                        settings.opensubtitles_password.get_secret_value()
+                        if settings.opensubtitles_password is not None
+                        else None
+                    ),
                     cache_ttl_seconds=settings.subtitle_cache_ttl_seconds,
                 ),
             )

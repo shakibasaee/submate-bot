@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     telegram_bot_token: SecretStr
     tmdb_api_key: SecretStr | None = None
     opensubtitles_api_key: SecretStr | None = None
+    opensubtitles_username: SecretStr | None = None
+    opensubtitles_password: SecretStr | None = None
     database_url: SecretStr | None = None
     redis_url: SecretStr | None = None
     tmdb_cache_ttl_seconds: int = 300

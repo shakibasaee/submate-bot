@@ -24,8 +24,16 @@ class HealthServer:
         self.providers_configured = {
             "tmdb": settings.tmdb_api_key is not None
             and not settings.tmdb_api_key.get_secret_value().startswith("replace-"),
-            "opensubtitles": settings.opensubtitles_api_key is not None
-            and not settings.opensubtitles_api_key.get_secret_value().startswith("replace-"),
+            "opensubtitles": all(
+                secret is not None
+                and bool(secret.get_secret_value())
+                and not secret.get_secret_value().startswith("replace-")
+                for secret in (
+                    settings.opensubtitles_api_key,
+                    settings.opensubtitles_username,
+                    settings.opensubtitles_password,
+                )
+            ),
         }
         self._dependency_health = dependency_health
         self._runner: web.AppRunner | None = None

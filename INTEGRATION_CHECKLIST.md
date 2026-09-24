@@ -1,6 +1,7 @@
 # SubMate baseline and integration evidence
 
-Checked 2026-09-21. This checklist distinguishes automated tests from live delivery.
+Last reconciled 2026-09-24. This checklist distinguishes automated tests from live
+delivery and records only evidence that was actually observed.
 
 ## Baseline
 
@@ -15,8 +16,11 @@ Checked 2026-09-21. This checklist distinguishes automated tests from live deliv
 - [x] Automated suite: 92 tests pass, including movie and episode application
   delivery, provider authentication/error contracts, and smoke lifecycle checks.
   These use fakes and do not prove live provider or Telegram delivery.
-- [ ] Recovery PR passes hosted Quality checks and is merged.
-- [ ] Default-branch Quality run passes after merge.
+- [x] Recovery PR #2 passed hosted Quality checks and was merged as `bcc7fb3`.
+- [x] Default-branch Quality run `35624502885` passed after the merge.
+- [x] Re-run the complete local gate on 2026-09-24: locked dependencies are
+  consistent, Ruff lint/format and Pyright pass, and 92 tests pass with 77%
+  statement coverage.
 
 ## Live integration (pending credentials and a test chat)
 
@@ -35,10 +39,12 @@ details into this checklist, recordings, or logs.
 
 | Check | Result | Evidence |
 | --- | --- | --- |
-| Live movie delivery | Not run | No credentials configured in this workspace |
-| Live episode delivery | Not run | No credentials configured in this workspace |
-| Hosted PR CI | Pending | Record the run URL after completion |
-| Default branch CI | Pending | Requires merge and a successful push run |
+| Telegram authentication | Pass | Bot API `getMe` succeeded on 2026-09-21; no token was printed or recorded |
+| Full production smoke | Blocked | Repository `.env` is absent; TMDb and OpenSubtitles credentials are unavailable |
+| Live movie delivery | Not run | Requires the five configured credentials and a test chat |
+| Live episode delivery | Not run | Requires the five configured credentials and a test chat |
+| Hosted PR CI | Pass | Quality run `35623114441` |
+| Default branch CI | Pass | Quality run `35624502885` for `bcc7fb3` |
 
 ## Conversation recovery acceptance (next milestone)
 
@@ -59,6 +65,16 @@ type a command instead of opening its picker.
 - [ ] Verify deployment, restart behavior, and secret handling before publication.
 - [ ] Owner chooses a license if publishing; add release notes and stable tag only
   after deployment and live integration evidence exists.
+
+## Current issue classification
+
+- **Blocker:** real TMDb/OpenSubtitles search and Telegram movie/episode delivery
+  cannot be verified without the missing provider credentials.
+- **Blocker:** a production-like PostgreSQL/Redis deployment and restart have not
+  been exercised on this host; Docker is not currently available.
+- **Important:** conversation recovery still has the dead ends listed above.
+- **Important:** the public repository has no description, topics, or license.
+- **Follow-up:** record and link the short walkthrough after live verification.
 
 Defer filename matching until baseline and recovery are complete. No web frontend,
 automatic synchronization, model training, additional deployment platforms, or

@@ -112,6 +112,26 @@ python -m pip install -e ".[dev]"
 
 ### Configure
 
+#### Obtain a TMDb API key
+
+SubMate uses TMDb's v3 application authentication. To obtain the correct key:
+
+1. Create or sign in to your [TMDb account](https://www.themoviedb.org/login) from
+   a desktop browser.
+2. Open **Account settings**, select **API**, and request a developer API key.
+3. Accept the TMDb API terms and describe the SubMate application when prompted.
+4. Copy the value labelled **API Key (v3 auth)**. SubMate sends this value as the
+   `api_key` query parameter; do not substitute the longer API Read Access Token.
+5. Store the key only in the ignored local `.env` file or your deployment platform's
+   secret store.
+
+TMDb documents the registration process in its official
+[Getting Started guide](https://developer.themoviedb.org/docs/getting-started) and
+[authentication guide](https://developer.themoviedb.org/docs/authentication-application).
+Non-commercial API use is subject to TMDb's terms and attribution requirements.
+
+#### Add the credentials
+
 Open `.env` and replace the credential placeholders:
 
 ```dotenv
@@ -140,6 +160,11 @@ python -m app.main
 
 Open the bot in Telegram and send `/start`. Only one polling process should use a
 bot token at a time.
+
+To verify the live TMDb path, choose a language and search for `Inception`. A result
+showing the movie title and release year confirms that Telegram polling and TMDb
+search are working together. This check does not verify subtitle search or delivery;
+those require the three OpenSubtitles credentials as well.
 
 ## Telegram commands
 

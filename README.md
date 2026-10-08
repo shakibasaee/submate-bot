@@ -14,7 +14,7 @@ deployment.
 
 ## How it works
 
-1. Start the bot and choose English or Persian.
+1. Start the bot and choose English or Persian on first use; later searches remember it.
 2. Search for a movie or TV series.
 3. Select the matching title. For TV, choose a season and episode.
 4. Review ranked subtitle results and request more when available.
@@ -42,7 +42,7 @@ into memory, validated, and sent without being written to local storage.
 ## Current status
 
 The installable baseline passes dependency validation, linting, formatting, static
-type checking, and 92 automated tests on Python 3.13. The test suite covers movie
+type checking, and 102 automated tests on Python 3.13. The test suite covers movie
 and episode workflows, provider authentication and errors, application lifecycle,
 configuration, logging safety, and deployment configuration.
 
@@ -52,9 +52,10 @@ are reachable from a particular deployment. Use the production smoke check and t
 manual movie and episode checks described below before treating a deployment as
 verified.
 
-Conversation recovery after a failed or successful download is still limited. A
-user may need to use `/start` or `/language` to begin another search. See
-[Current limitations](#current-limitations) for the exact behavior.
+Failed downloads preserve the selected title, language, and subtitle choices.
+Retry requests a fresh download; Search another title starts a new search.
+After delivery, Another subtitle returns to the choices. Change language opens
+the language picker directly and refreshes subtitles for the selected movie or episode.
 
 ## Quick start
 
@@ -66,7 +67,8 @@ user may need to use `/start` or `/language` to begin another search. See
 - An OpenSubtitles API key, username, and password
 - Network access to Telegram, TMDb, and OpenSubtitles
 
-PostgreSQL and Redis are optional when running locally.
+PostgreSQL and Redis are optional when running locally. Set
+`PREFERENCE_SQLITE_PATH=data/preferences.sqlite3` to remember languages after restart.
 
 ### Install
 
@@ -159,7 +161,8 @@ python -m app.main
 ```
 
 Open the bot in Telegram and send `/start`. Only one polling process should use a
-bot token at a time.
+bot token at a time. A local process lock prevents a second instance started
+through `python -m app.main`; it cannot detect another computer polling the bot.
 
 To verify the live TMDb path, choose a language and search for `Inception`. A result
 showing the movie title and release year confirms that Telegram polling and TMDb
@@ -170,7 +173,7 @@ those require the three OpenSubtitles credentials as well.
 
 | Command | Purpose |
 | --- | --- |
-| `/start` | Reset the current workflow and open the language picker. |
+| `/start` | Start a search using your saved language, or choose one on first use. |
 | `/language` | Choose or change the subtitle language. |
 | `/cancel` | End the current workflow without forgetting the selected language. |
 | `/privacy` | Show the privacy, copyright, and provider notice. |
@@ -192,6 +195,7 @@ precedence. Setting names are case-insensitive and unknown settings are ignored.
 | `OPENSUBTITLES_USERNAME` | For downloads | Authenticates OpenSubtitles downloads. |
 | `OPENSUBTITLES_PASSWORD` | For downloads | Authenticates OpenSubtitles downloads. |
 | `DATABASE_URL` | No | PostgreSQL connection used for language preferences. |
+| `PREFERENCE_SQLITE_PATH` | No | Local durable language storage when PostgreSQL is omitted. |
 | `REDIS_URL` | No | Redis connection used for caches and rate limits. |
 
 Only the Telegram token is required while loading configuration. Readiness requires
@@ -224,9 +228,12 @@ timestamps. The preference table is created at startup, so the database must exi
 and the configured user must be allowed to create the table.
 
 Redis stores cached TMDb results, cached subtitle results, and rate-limit counters.
-Raw title queries are hashed before being used in cache keys.
+Raw title queries are hashed before being used in cache keys. Local SQLite stores
+only user IDs and language preferences; its database belongs in the ignored `data/` directory.
 
-When PostgreSQL or Redis is omitted, SubMate uses in-memory implementations. If a
+When PostgreSQL is omitted, `PREFERENCE_SQLITE_PATH` enables local durable
+preferences. Without it, preferences use memory. Redis omission uses memory for
+caches and rate limits. If a
 configured service fails during startup, the process falls back to memory and must
 be restarted after the service is restored to reconnect. Preference writes made
 during an outage are not replayed automatically.
@@ -281,7 +288,20 @@ Run the production smoke check from a configured environment:
 python -m scripts.production_smoke
 ```
 
-The check constructs the real application runtime, checks attached dependencies,
+For secret-safe live provider verification, run:
+
+```bash
+python -m scripts.live_check
+```
+
+This verifies the Telegram target and webhook status, searches TMDb, and, when
+all credentials are configured, downloads one Inception movie SRT and one
+Breaking Bad S01E01 SRT into memory. It consumes provider download quota.
+It never sends Telegram documents or establishes that chat delivery works.
+Errors are reported as status categories; credentials and response bodies are omitted.
+Telegram timeouts and network failures do not prove that credentials are invalid.
+
+The production smoke check constructs the real application runtime, checks attached dependencies,
 verifies provider configuration, and authenticates with Telegram. It does not call
 TMDb or OpenSubtitles and does not send a document.
 
@@ -315,6 +335,7 @@ app/
   core/                   Settings, logging, retries, health, and metrics
 scripts/
   production_smoke.py     Runtime and Telegram authentication check
+  live_check.py           Live provider authentication/search/SRT check
 tests/                    Unit, integration-style, security, and lifecycle tests
 ```
 
@@ -345,9 +366,14 @@ Quality workflow passes. Tag reviewed releases using semantic versioning.
 
 - SubMate supports one polling process. Conversation state and per-user locks are
   process-local, so Redis does not make multiple bot replicas safe.
-- Failed provider downloads do not yet restore the previous subtitle choices.
-  Successful delivery also leaves the workflow in a delivery state. Use `/start`
-  or `/language` to begin another search.
+- A local bot stops when its process or computer stops. No always-on deployment
+  is implied by local verification.
+- For local durable language preferences, set
+  `PREFERENCE_SQLITE_PATH=data/preferences.sqlite3`. PostgreSQL takes precedence
+  when configured. Without either store, preferences are held in memory.
+- Active conversations are lost on restart; send /start to resume.
+- Telegram upload failures can have an uncertain delivery outcome. Check the chat
+  before retrying to avoid requesting an additional copy.
 - OpenSubtitles is the only subtitle provider. English and Persian are the only
   selectable languages.
 - Only validated SRT content up to 2 MiB is accepted. Archive extraction and

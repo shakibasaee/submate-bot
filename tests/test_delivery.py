@@ -61,3 +61,17 @@ def test_delivery_consumes_candidate_once_and_generates_safe_filename() -> None:
 
     asyncio.run(flow())
     assert provider.download_calls == 1
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        b"1\n00:00:02,000 --> 00:00:01,000\nBackwards\n",
+        b"1\n00:99:01,000 --> 00:99:02,000\nInvalid time\n",
+        b"1\n00:00:01,000 --> 00:00:02,000\n",
+        b"1\n00:00:01,000 --> 00:00:02,000\nValid\n\nmalformed cue",
+    ],
+)
+def test_invalid_srt_cues_are_rejected(content):
+    with pytest.raises(UnsafeSubtitleError):
+        validate_srt(content)

@@ -83,7 +83,7 @@ def test_user_log_reference_does_not_expose_telegram_id() -> None:
 
 
 def test_readiness_requires_provider_configuration() -> None:
-    settings = Settings(telegram_bot_token="123456:abcdefghijklmnopqrstuvwxyz")
+    settings = Settings(telegram_bot_token="123456:abcdefghijklmnopqrstuvwxyz", _env_file=None)
 
     async def healthy() -> dict[str, str | bool]:
         return {"redis": "disabled", "postgres": "disabled", "ready": True}

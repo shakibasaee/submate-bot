@@ -18,7 +18,8 @@ async def send_subtitle_page(
 ) -> None:
     if not page.candidates:
         await message.answer(
-            "No subtitles found. Try /language, search a different title, or try again later."
+            "No subtitles found. Change language or search another title.",
+            reply_markup=subtitle_keyboard(page),
         )
         return
     language_label = "English" if language is LanguageCode.ENGLISH else "Persian"

@@ -1,8 +1,9 @@
 """Atomic candidate consumption and provider-neutral delivery."""
 
 import re
+from uuid import uuid4
 
-from app.application.dto import DeliveryOutcome, WorkflowStage
+from app.application.dto import DeliveryOutcome, SubtitlePageOutcome, WorkflowStage
 from app.application.ports.conversations import ConversationRepository
 from app.application.ports.locks import UserLockManager
 from app.application.ports.providers import SubtitleProvider
@@ -39,6 +40,43 @@ class DeliverSubtitle:
         self._locks = locks
         self._user_limit = user_limit
         self._global_limit = global_limit
+
+    async def current_page(self, user_id: int, workflow_id: WorkflowId) -> SubtitlePageOutcome:
+        async with self._locks.hold(user_id):
+            current = await self._conversations.get(user_id)
+            if (
+                current.workflow_id != workflow_id
+                or current.stage is not WorkflowStage.CHOOSING_SUBTITLE
+            ):
+                raise WorkflowExpiredError("These buttons expired. Send /start to search again.")
+            assert current.language is not None
+            await self._conversations.save(current.evolve(subtitle_offset=0))
+            return SubtitlePageOutcome(
+                current.workflow_id,
+                current.language,
+                current.subtitle_candidates[:5],
+                0,
+                len(current.subtitle_candidates) > 5,
+            )
+
+    async def finish(self, user_id: int, workflow_id: WorkflowId) -> WorkflowId:
+        async with self._locks.hold(user_id):
+            current = await self._conversations.get(user_id)
+            if current.workflow_id != workflow_id or current.stage is not WorkflowStage.DELIVERING:
+                raise WorkflowExpiredError("This delivery has expired.")
+            updated = current.evolve(
+                workflow_id=WorkflowId(uuid4().hex), stage=WorkflowStage.CHOOSING_SUBTITLE
+            )
+            await self._conversations.save(updated)
+            return updated.workflow_id
+
+    async def restore(self, user_id: int, workflow_id: WorkflowId) -> None:
+        async with self._locks.hold(user_id):
+            current = await self._conversations.get(user_id)
+            if current.workflow_id == workflow_id and current.stage is WorkflowStage.DELIVERING:
+                await self._conversations.save(
+                    current.evolve(stage=WorkflowStage.CHOOSING_SUBTITLE)
+                )
 
     async def execute(
         self,
@@ -79,14 +117,23 @@ class DeliverSubtitle:
             await self._conversations.save(
                 conversation.evolve(
                     stage=WorkflowStage.DELIVERING,
-                    subtitle_candidates=(),
                 )
             )
 
         provider = self._providers.get(candidate.provider_id)
         if provider is None:
+            await self.restore(user_id, workflow_id)
             raise WorkflowExpiredError("That subtitle provider is no longer available.")
-        downloaded = await provider.download(candidate)
+        try:
+            downloaded = await provider.download(candidate)
+        except BaseException:
+            async with self._locks.hold(user_id):
+                current = await self._conversations.get(user_id)
+                if current.workflow_id == workflow_id and current.stage is WorkflowStage.DELIVERING:
+                    await self._conversations.save(
+                        current.evolve(stage=WorkflowStage.CHOOSING_SUBTITLE)
+                    )
+            raise
 
         async with self._locks.hold(user_id):
             current = await self._conversations.get(user_id)

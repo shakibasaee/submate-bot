@@ -4,6 +4,7 @@ from app.domain.errors import (
     ApplicationError,
     ConfigurationError,
     MetadataError,
+    ProviderAuthenticationError,
     ProviderError,
     ProviderLinkError,
     ProviderQuotaError,
@@ -26,6 +27,8 @@ def present_error(error: ApplicationError) -> str:
         return "That subtitle was rejected because it was unsafe, corrupt, or not a valid SRT."
     if isinstance(error, MetadataError):
         return str(error)
+    if isinstance(error, ProviderAuthenticationError):
+        return "Subtitle account access was rejected. The operator must check credentials."
     if isinstance(error, ProviderError):
-        return "Subtitle search is temporarily unavailable. Please try again later."
+        return "The subtitle provider is temporarily unavailable. Please try again later."
     return str(error)

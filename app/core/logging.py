@@ -35,6 +35,8 @@ def _redact_value(key: str, value: Any) -> Any:
         return [_redact_value(key, item) for item in value]
     if isinstance(value, str):
         value = BOT_TOKEN_PATTERN.sub("[REDACTED_TOKEN]", value)
+        value = re.sub(r"(?i)(api_key=)[^&\s]+", r"\1[REDACTED]", value)
+        value = re.sub(r"\b[a-fA-F0-9]{32}\b", "[REDACTED_KEY]", value)
         return URL_PASSWORD_PATTERN.sub(r"\1[REDACTED]\2", value)
     return value
 

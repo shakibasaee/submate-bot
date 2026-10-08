@@ -2,9 +2,17 @@
 
 import structlog
 from aiogram import F, Router
-from aiogram.types import BufferedInputFile, CallbackQuery, Message
+from aiogram.exceptions import TelegramAPIError
+from aiogram.types import (
+    BufferedInputFile,
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+)
 
 from app.application.container import ApplicationServices
+from app.bot.handlers.language import TITLE_PROMPT, show_language_picker
 from app.bot.keyboards.subtitles import subtitle_keyboard, subtitle_label
 from app.bot.presentation import remove_inline_keyboard, safe_caption
 from app.bot.presenters.errors import present_error
@@ -37,11 +45,28 @@ async def subtitle_selected(callback: CallbackQuery, services: ApplicationServic
         return
 
     if (provider_id, action) == ("action", "cancel"):
+        try:
+            await services.deliver_subtitle.current_page(callback.from_user.id, workflow_id)
+        except ApplicationError as error:
+            await message.answer(present_error(error))
+            return
         await remove_inline_keyboard(message)
         await services.cancel_workflow.execute(callback.from_user.id)
         return
-    if (provider_id, action) == ("action", "language"):
-        await message.answer("Use /language to change the subtitle language.")
+    if provider_id == "action" and action in {"language", "search", "another"}:
+        try:
+            page = await services.deliver_subtitle.current_page(callback.from_user.id, workflow_id)
+        except ApplicationError as error:
+            await message.answer(present_error(error))
+            return
+        await remove_inline_keyboard(message)
+        if action == "language":
+            await show_language_picker(message, str(workflow_id))
+        elif action == "search":
+            await services.start_search.execute(callback.from_user.id)
+            await message.answer(TITLE_PROMPT)
+        else:
+            await send_subtitle_page(message, page, title="this title", language=page.language)
         return
     if (provider_id, action) == ("page", "more"):
         try:
@@ -70,15 +95,68 @@ async def subtitle_selected(callback: CallbackQuery, services: ApplicationServic
             int(action),
         )
     except ApplicationError as error:
-        await message.answer(present_error(error))
+        markup = None
+        try:
+            await services.deliver_subtitle.current_page(callback.from_user.id, workflow_id)
+            markup = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="Retry", callback_data=callback.data)],
+                    [
+                        InlineKeyboardButton(
+                            text="Search another title",
+                            callback_data=f"subtitle:{workflow_id}:action:search",
+                        )
+                    ],
+                ]
+            )
+        except ApplicationError:
+            pass
+        await message.answer(present_error(error), reply_markup=markup)
         return
 
     subtitle = outcome.subtitle
     uploader = f"\nUploader: {subtitle.uploader}" if subtitle.uploader else ""
     document = BufferedInputFile(subtitle.content, filename=subtitle.filename)
-    await message.answer_document(
-        document,
-        caption=safe_caption(f"{subtitle.attribution}{uploader}"),
+    try:
+        await message.answer_document(
+            document,
+            caption=safe_caption(f"{subtitle.attribution}{uploader}"),
+        )
+    except TelegramAPIError:
+        await services.deliver_subtitle.restore(callback.from_user.id, workflow_id)
+        await message.answer(
+            "Telegram could not confirm file delivery. Check the chat before retrying.",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="Retry", callback_data=callback.data)],
+                    [
+                        InlineKeyboardButton(
+                            text="Search another title",
+                            callback_data=f"subtitle:{workflow_id}:action:search",
+                        )
+                    ],
+                ]
+            ),
+        )
+        return
+    next_id = await services.deliver_subtitle.finish(callback.from_user.id, workflow_id)
+    await message.answer(
+        "Subtitle sent. What next?",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="Another subtitle", callback_data=f"subtitle:{next_id}:action:another"
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="Search another title",
+                        callback_data=f"subtitle:{next_id}:action:search",
+                    )
+                ],
+            ]
+        ),
     )
     monitoring.increment("deliveries", "telegram")
     logger.info("subtitle_delivered", user_ref=user_reference(callback.from_user.id))

@@ -13,6 +13,7 @@ from redis.exceptions import RedisError
 from app.application.container import ApplicationServices
 from app.application.dto import ApplicationLimits
 from app.application.ports.metadata import MetadataGateway
+from app.application.ports.preferences import PreferenceRepository
 from app.application.use_cases import (
     CancelWorkflow,
     ChooseLanguage,
@@ -36,6 +37,7 @@ from app.infrastructure.persistence.memory import (
     InMemoryUserLockManager,
 )
 from app.infrastructure.persistence.postgres import PostgresPreferenceRepository
+from app.infrastructure.persistence.sqlite import SqlitePreferenceRepository
 from app.infrastructure.providers.opensubtitles import OpenSubtitlesProvider
 
 logger = structlog.get_logger(__name__)
@@ -140,7 +142,9 @@ async def build_runtime(settings: Settings) -> ApplicationRuntime:
                 logger.warning("redis_unavailable", fallback="memory")
 
         memory_preferences = InMemoryPreferenceRepository()
-        preferences = memory_preferences
+        preferences: PreferenceRepository = memory_preferences
+        if settings.preference_sqlite_path and settings.database_url is None:
+            preferences = SqlitePreferenceRepository(settings.preference_sqlite_path)
         if settings.database_url is not None:
             pool: AsyncConnectionPool[Any] = AsyncConnectionPool(
                 settings.database_url.get_secret_value(),

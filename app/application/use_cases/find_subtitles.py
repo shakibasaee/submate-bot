@@ -84,6 +84,13 @@ class FindSubtitles:
             has_more=offset + self._page_size < len(conversation.subtitle_candidates),
         )
 
+    async def refresh(self, user_id: int, workflow_id: WorkflowId) -> SubtitlePageOutcome:
+        async with self._locks.hold(user_id):
+            conversation = await self._conversations.get(user_id)
+            if conversation.workflow_id != workflow_id:
+                raise InvalidTransitionError("That selection has expired.")
+            return await self.find_for(conversation)
+
     async def next_page(self, user_id: int, workflow_id: WorkflowId) -> SubtitlePageOutcome:
         async with self._locks.hold(user_id):
             conversation = await self._conversations.get(user_id)

@@ -48,8 +48,8 @@ def subtitle_keyboard(page: SubtitlePageOutcome) -> InlineKeyboardMarkup:
                 callback_data=f"subtitle:{page.workflow_id}:action:language",
             ),
             InlineKeyboardButton(
-                text="Cancel",
-                callback_data=f"subtitle:{page.workflow_id}:action:cancel",
+                text="Search another title",
+                callback_data=f"subtitle:{page.workflow_id}:action:search",
             ),
         ]
     )

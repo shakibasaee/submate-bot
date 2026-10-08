@@ -10,6 +10,7 @@ from app.application.dto import (
 from app.application.ports.conversations import ConversationRepository
 from app.application.ports.locks import UserLockManager
 from app.application.ports.preferences import PreferenceRepository
+from app.domain.errors import WorkflowExpiredError
 from app.domain.languages import LanguageCode
 from app.domain.models import WorkflowId
 
@@ -30,7 +31,9 @@ class StartSearch:
         async with self._locks.hold(user_id):
             conversation = await self._conversations.reset_workflow(user_id)
             if language is not None:
-                await self._conversations.save(conversation.evolve(language=language))
+                await self._conversations.save(
+                    conversation.evolve(language=language, stage=WorkflowStage.AWAITING_TITLE)
+                )
         return StartSearchOutcome(language)
 
 
@@ -45,11 +48,28 @@ class ChooseLanguage:
         self._preferences = preferences
         self._locks = locks
 
-    async def execute(self, user_id: int, language: LanguageCode) -> LanguageSelectedOutcome:
-        await self._preferences.set_language(user_id, language)
+    async def execute(
+        self, user_id: int, language: LanguageCode, expected_workflow: WorkflowId | None = None
+    ) -> LanguageSelectedOutcome:
         async with self._locks.hold(user_id):
             conversation = await self._conversations.get(user_id)
+            if expected_workflow is not None and (
+                conversation.workflow_id != expected_workflow
+                or conversation.stage is not WorkflowStage.CHOOSING_SUBTITLE
+            ):
+                raise WorkflowExpiredError("That language picker expired. Use /language.")
+            await self._preferences.set_language(user_id, language)
             workflow_id = WorkflowId(uuid4().hex)
+            if expected_workflow is not None:
+                await self._conversations.save(
+                    conversation.evolve(
+                        workflow_id=workflow_id,
+                        language=language,
+                        subtitle_candidates=(),
+                        subtitle_offset=0,
+                    )
+                )
+                return LanguageSelectedOutcome(workflow_id, language)
             await self._conversations.save(
                 conversation.evolve(
                     workflow_id=workflow_id,

@@ -113,7 +113,23 @@ def validate_srt(content: bytes) -> bytes:
             break
     if text is None:
         raise UnsafeSubtitleError("file is not a valid SRT subtitle")
-    return text.replace("\r\n", "\n").replace("\r", "\n").encode("utf-8")
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    blocks = re.split(r"\n\s*\n", normalized.strip())
+    timestamp = r"(\d{1,2}):([0-5]\d):([0-5]\d)[,.](\d{3})"
+    cue = re.compile(rf"^{timestamp}\s*-->\s*{timestamp}\s*$")
+    for block in blocks:
+        lines = block.strip().splitlines()
+        if len(lines) < 3 or not lines[0].strip().isdigit():
+            raise UnsafeSubtitleError("invalid SRT cue structure")
+        match = cue.fullmatch(lines[1].strip())
+        if match is None or not any(line.strip() for line in lines[2:]):
+            raise UnsafeSubtitleError("invalid SRT cue content")
+        values = tuple(map(int, match.groups()))
+        start = ((values[0] * 60 + values[1]) * 60 + values[2]) * 1000 + values[3]
+        end = ((values[4] * 60 + values[5]) * 60 + values[6]) * 1000 + values[7]
+        if end <= start:
+            raise UnsafeSubtitleError("invalid SRT cue duration")
+    return normalized.encode("utf-8")
 
 
 def _validate_download_url(url: str) -> None:

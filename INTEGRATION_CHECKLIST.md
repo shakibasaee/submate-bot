@@ -1,82 +1,52 @@
-# SubMate baseline and integration evidence
+# SubMate verification evidence
 
-Last reconciled 2026-09-24. This checklist distinguishes automated tests from live
-delivery and records only evidence that was actually observed.
+Verified locally on 2026-10-08 in the existing Windows checkout. Automated tests
+use controlled providers and do not establish real Telegram document delivery.
 
-## Baseline
+## Automated verification
 
-- [x] Inspect `main` (`c898a20`) and `codex/recover-mvp` (`4b37454`).
-- [x] Identify the default-branch CI failure: a Windows editable path in
-  `requirements.lock` prevents Linux installation (Actions run `32502340980`).
-- [x] Review recovery changes: portable installation, current composition-root
-  smoke check, authenticated provider downloads, episode IDs, and provider tests.
-- [x] Install locked dependencies and the editable package in a fresh Python
-  3.13.3 virtual environment on Windows; `pip check` passes.
-- [x] Ruff lint/format and Pyright pass.
-- [x] Automated suite: 92 tests pass, including movie and episode application
-  delivery, provider authentication/error contracts, and smoke lifecycle checks.
-  These use fakes and do not prove live provider or Telegram delivery.
-- [x] Recovery PR #2 passed hosted Quality checks and was merged as `bcc7fb3`.
-- [x] Default-branch Quality run `35624502885` passed after the merge.
-- [x] Re-run the complete local gate on 2026-09-24: locked dependencies are
-  consistent, Ruff lint/format and Pyright pass, and 92 tests pass with 77%
-  statement coverage.
+- 102 tests passed; 78% statement coverage.
+- Dependency validation, Ruff lint, formatting, and Pyright passed.
+- Movie and TV workflows retain episode coordinates and produce safe filenames.
+- Invalid SRT cue structures, times, empty files, archives, and oversized files are rejected.
+- Provider failure retains title, language, and choices; Retry is available.
+- Telegram upload failure restores choices and warns that delivery can be uncertain.
+- Successful upload provides Another subtitle and Search another title.
+- Duplicate delivery clicks and stale workflow buttons are rejected.
+- Contextual Change language preserves the media and refreshes subtitle results.
+- SQLite preferences survive replacement of the repository instance.
+- Local polling lock blocks a duplicate token instance and releases on shutdown.
 
-## Live integration (pending credentials and a test chat)
-
-Use a dedicated test bot with one polling process. Keep credentials in an ignored
-`.env`; never copy tokens, passwords, temporary download URLs, or personal chat
-details into this checklist, recordings, or logs.
-
-1. Configure Telegram, TMDb, and OpenSubtitles credentials using the README.
-2. Run `python -m scripts.production_smoke`. This checks composition, configured
-   dependencies, and Telegram authentication; it does not download subtitles.
-3. Start `python -m app.main`, open the test bot, and select English or Persian.
-4. Search for a movie with available subtitles, select a result and subtitle,
-   and open the received SRT. Record title, language, date, and pass/fail below.
-5. Search for a series, choose a season and episode, and receive/open the SRT.
-   Confirm the filename contains the selected season, episode, and language.
+## Live verification
 
 | Check | Result | Evidence |
 | --- | --- | --- |
-| Telegram authentication | Not run | Previous `getMe` evidence used an unrelated bot credential and is invalid for SubMate |
-| Full production smoke | Blocked | Repository `.env` contains placeholders; an owned Telegram token and provider credentials are unavailable |
-| Live movie delivery | Not run | Requires the five configured credentials and a test chat |
-| Live episode delivery | Not run | Requires the five configured credentials and a test chat |
-| Hosted PR CI | Pass | Quality run `35623114441` |
-| Default branch CI | Pass | Quality run `36236013971` for `57bf7b0` |
+| Telegram credential configuration | Present | Value checked locally without disclosure |
+| Telegram target authentication | Blocked | getMe timed out; credential validity and target identity remain unconfirmed |
+| TMDb credential configuration | Present | Value checked locally without disclosure |
+| TMDb live search | Failed | Provider request failed; see secret-safe live_check status for classification |
+| OpenSubtitles configuration | Missing | API key, username, and password still contain placeholders |
+| OpenSubtitles authentication/download | Not run | Requires local credentials |
+| Real movie SRT delivery to Telegram | Not run | Requires reachable providers, credentials, and user interaction |
+| Real episode SRT delivery to Telegram | Not run | Requires reachable providers, credentials, and user interaction |
+| Polling process | Not started | Target identity could not be verified; no unrelated processes stopped |
+| External deployment | Not performed | Local operation does not provide permanent availability |
 
-## Conversation recovery acceptance (next milestone)
+Local SQLite preference storage is enabled in the ignored .env. Conversation
+state remains in memory and expires after 30 minutes; after restart use /start.
 
-Confirmed defects: candidates are cleared before provider download completes;
-the workflow remains DELIVERING after success; Change language asks users to
-type a command instead of opening its picker.
+## Telegram acceptance checklist
 
-- [ ] Download failure preserves choices and offers Retry and Search another title.
-- [ ] Telegram delivery failure also leaves an actionable recovery path.
-- [ ] Successful delivery allows another search without restarting.
-- [ ] Change language opens the picker directly.
-- [ ] Tests cover success, failure, concurrent attempts, and stale callbacks.
+After credentials/connectivity are verified and one polling process is started:
 
-## Demo and release gates
+1. Open @Sub_Mate_bot, send /start, and choose English on first use.
+2. Search Inception; select the 2010 movie and a subtitle. Open the delivered SRT.
+3. Choose Another subtitle, then Change language; confirm the current movie remains selected.
+4. Choose Search another title. Search Breaking Bad, select Season 1 and Episode 1,
+   choose a subtitle, and verify a nonempty S01E01-en.srt document arrives.
+5. Double-click a subtitle button; confirm only one document is sent. Old buttons
+   should explain expiry without changing the new search.
+6. If a real download fails, confirm Retry and Search another title work.
 
-- [ ] Record a 45–75 second real movie/episode walkthrough and link near README top.
-- [ ] Review setup/provider limitations and add repository description/topics.
-- [ ] Verify deployment, restart behavior, and secret handling before publication.
-- [ ] Owner chooses a license if publishing; add release notes and stable tag only
-  after deployment and live integration evidence exists.
-
-## Current issue classification
-
-- **Blocker:** Telegram authentication, real TMDb/OpenSubtitles search, and
-  movie/episode delivery cannot be verified without an owned bot token and the
-  missing provider credentials.
-- **Blocker:** a production-like PostgreSQL/Redis deployment and restart have not
-  been exercised on this host; Docker is not currently available.
-- **Important:** conversation recovery still has the dead ends listed above.
-- **Important:** the public repository has no description, topics, or license.
-- **Follow-up:** record and link the short walkthrough after live verification.
-
-Defer filename matching until baseline and recovery are complete. No web frontend,
-automatic synchronization, model training, additional deployment platforms, or
-horizontal scaling is planned for this milestone.
+Do not store secrets, temporary provider links, user/chat identifiers, or downloaded
+subtitles in evidence or recordings. No live delivery is claimed until observed.

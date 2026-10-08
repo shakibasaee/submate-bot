@@ -14,6 +14,7 @@ from app.core.config import get_settings
 from app.core.health import HealthServer
 from app.core.logging import configure_logging
 from app.core.monitoring import monitoring
+from app.core.polling_lock import polling_lock
 
 
 async def run() -> None:
@@ -65,7 +66,15 @@ async def run() -> None:
 
 def main() -> None:
     """Run the asynchronous bot process."""
-    asyncio.run(run())
+    try:
+        settings = get_settings()
+        with polling_lock(settings.telegram_bot_token.get_secret_value()):
+            asyncio.run(run())
+    except KeyboardInterrupt:
+        return
+    except Exception as error:
+        print(f"SubMate stopped: {type(error).__name__}. Check configuration and connectivity.")
+        raise SystemExit(1) from None
 
 
 if __name__ == "__main__":

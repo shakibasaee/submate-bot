@@ -102,6 +102,8 @@ class TmdbMetadataGateway:
                 ) as response:
                     if response.status in {408, 425, 429} or response.status >= 500:
                         raise _TransientMetadataError("TMDb is temporarily unavailable")
+                    if response.status in {401, 403}:
+                        raise MetadataError("TMDb rejected the configured API key or access.")
                     if response.status != 200:
                         raise MetadataError("TMDb request failed")
                     payload = await response.json()

@@ -39,12 +39,12 @@ details into this checklist, recordings, or logs.
 
 | Check | Result | Evidence |
 | --- | --- | --- |
-| Telegram authentication | Pass | Bot API `getMe` succeeded on 2026-09-21; no token was printed or recorded |
-| Full production smoke | Blocked | Repository `.env` is absent; TMDb and OpenSubtitles credentials are unavailable |
+| Telegram authentication | Not run | Previous `getMe` evidence used an unrelated bot credential and is invalid for SubMate |
+| Full production smoke | Blocked | Repository `.env` contains placeholders; an owned Telegram token and provider credentials are unavailable |
 | Live movie delivery | Not run | Requires the five configured credentials and a test chat |
 | Live episode delivery | Not run | Requires the five configured credentials and a test chat |
 | Hosted PR CI | Pass | Quality run `35623114441` |
-| Default branch CI | Pass | Quality run `35624502885` for `bcc7fb3` |
+| Default branch CI | Pass | Quality run `36236013971` for `57bf7b0` |
 
 ## Conversation recovery acceptance (next milestone)
 
@@ -68,8 +68,9 @@ type a command instead of opening its picker.
 
 ## Current issue classification
 
-- **Blocker:** real TMDb/OpenSubtitles search and Telegram movie/episode delivery
-  cannot be verified without the missing provider credentials.
+- **Blocker:** Telegram authentication, real TMDb/OpenSubtitles search, and
+  movie/episode delivery cannot be verified without an owned bot token and the
+  missing provider credentials.
 - **Blocker:** a production-like PostgreSQL/Redis deployment and restart have not
   been exercised on this host; Docker is not currently available.
 - **Important:** conversation recovery still has the dead ends listed above.

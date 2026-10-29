@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from uuid import uuid4
 
 from app.application.dto import Conversation, WorkflowStage
-from app.domain.languages import LanguageCode
+from app.domain.languages import InterfaceLanguage, LanguageCode
 from app.domain.models import WorkflowId
 
 
@@ -59,12 +59,19 @@ class InMemoryConversationRepository:
 class InMemoryPreferenceRepository:
     def __init__(self) -> None:
         self._languages: dict[int, LanguageCode] = {}
+        self._interface_languages: dict[int, InterfaceLanguage] = {}
 
     async def get_language(self, user_id: int) -> LanguageCode | None:
         return self._languages.get(user_id)
 
     async def set_language(self, user_id: int, language: LanguageCode) -> None:
         self._languages[user_id] = language
+
+    async def get_interface_language(self, user_id: int) -> InterfaceLanguage | None:
+        return self._interface_languages.get(user_id)
+
+    async def set_interface_language(self, user_id: int, language: InterfaceLanguage) -> None:
+        self._interface_languages[user_id] = language
 
     async def close(self) -> None:
         return None

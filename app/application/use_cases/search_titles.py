@@ -34,8 +34,8 @@ class SearchTitles:
             conversation = await self._conversations.get(user_id)
             if conversation.language is None:
                 raise InvalidTransitionError("Choose a subtitle language first with /language.")
-            if conversation.stage is not WorkflowStage.AWAITING_TITLE:
-                raise InvalidTransitionError("Use /language to start a subtitle search.")
+            if conversation.stage is WorkflowStage.DELIVERING:
+                raise InvalidTransitionError("A subtitle is being delivered. Please wait a moment.")
             decision = await self._rate_limiter.check(
                 "user-title-search", user_id, self._user_limit, 60
             )
@@ -49,11 +49,14 @@ class SearchTitles:
                     "Title search is busy right now.", global_decision.retry_after
                 )
             results = tuple(await self._metadata.search(normalized))
-            if results:
-                await self._conversations.save(
-                    conversation.evolve(
-                        stage=WorkflowStage.CHOOSING_TITLE,
-                        search_results=results,
-                    )
+            # A new text search deliberately replaces prior selections and buttons.
+            # Do this only after metadata succeeds, preserving choices on network failure.
+            current = await self._conversations.reset_workflow(user_id)
+            await self._conversations.save(
+                current.evolve(
+                    language=conversation.language,
+                    stage=WorkflowStage.CHOOSING_TITLE if results else WorkflowStage.AWAITING_TITLE,
+                    search_results=results,
                 )
-            return SearchTitlesOutcome(conversation.workflow_id, results)
+            )
+            return SearchTitlesOutcome(current.workflow_id, results, conversation.language)

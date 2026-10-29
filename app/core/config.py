@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     """Runtime settings. Secrets must be supplied through environment variables."""
 
     telegram_bot_token: SecretStr
+    demo_mode: bool = False
+    subdl_api_key: SecretStr | None = None
     tmdb_api_key: SecretStr | None = None
     opensubtitles_api_key: SecretStr | None = None
     opensubtitles_username: SecretStr | None = None

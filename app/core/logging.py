@@ -19,25 +19,39 @@ SENSITIVE_KEY_PARTS = (
     "redis_url",
     "query",
     "message_text",
+    "chat_id",
+    "user_id",
+    "bot_id",
+    "first_name",
+    "last_name",
 )
 BOT_TOKEN_PATTERN = re.compile(r"\b\d{6,}:[A-Za-z0-9_-]{20,}\b")
 URL_PASSWORD_PATTERN = re.compile(r"(\w+://[^:/\s]+:)[^@\s]+(@)")
+URL_PATTERN = re.compile(r"\b[a-z][a-z0-9+.-]*://[^\s\"'<>]+", re.I)
+IDENTIFIER_PATTERN = re.compile(
+    r"(?i)(\b(?:(?:chat|user|bot|update)[_ ]?)?id\b[\"']?\s*[:=]\s*)-?\d+"
+)
 
 
 def _redact_value(key: str, value: Any) -> Any:
-    if any(part in key.casefold() for part in SENSITIVE_KEY_PARTS):
+    if key.casefold() in {"id", "chat", "user", "from_user", "update_id"} or any(
+        part in key.casefold() for part in SENSITIVE_KEY_PARTS
+    ):
         return "[REDACTED]"
     if isinstance(value, dict):
         return {
             child_key: _redact_value(str(child_key), child) for child_key, child in value.items()
         }
-    if isinstance(value, list):
+    if isinstance(value, (list, tuple)):
         return [_redact_value(key, item) for item in value]
     if isinstance(value, str):
         value = BOT_TOKEN_PATTERN.sub("[REDACTED_TOKEN]", value)
         value = re.sub(r"(?i)(api_key=)[^&\s]+", r"\1[REDACTED]", value)
         value = re.sub(r"\b[a-fA-F0-9]{32}\b", "[REDACTED_KEY]", value)
-        return URL_PASSWORD_PATTERN.sub(r"\1[REDACTED]\2", value)
+        value = URL_PASSWORD_PATTERN.sub(r"\1[REDACTED]\2", value)
+        value = URL_PATTERN.sub("[REDACTED_URL]", value)
+        value = re.sub(r"(?i)(Bearer\s+)[\w.-]+", r"\1[REDACTED]", value)
+        return IDENTIFIER_PATTERN.sub(r"\1[REDACTED_ID]", value)
     return value
 
 
@@ -60,6 +74,7 @@ def configure_logging(level: str) -> None:
         structlog.contextvars.merge_contextvars,
         structlog.processors.add_log_level,
         structlog.processors.TimeStamper(fmt="iso", utc=True),
+        structlog.processors.format_exc_info,
         redact_sensitive,
     ]
     formatter = structlog.stdlib.ProcessorFormatter(

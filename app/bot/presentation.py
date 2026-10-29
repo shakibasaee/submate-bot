@@ -5,7 +5,8 @@ from html import escape
 from inspect import isawaitable
 from typing import Any
 
-from aiogram.exceptions import TelegramAPIError
+from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup
 
 TELEGRAM_BUTTON_TEXT_LIMIT = 64
 TELEGRAM_CAPTION_LIMIT = 1024
@@ -68,5 +69,26 @@ async def remove_inline_keyboard(message: Any) -> None:
         if isawaitable(result):
             await result
     except TelegramAPIError:
-        # Selection validity is enforced server-side even when Telegram cannot edit an old message.
+        return
+
+
+async def render_panel(
+    message: Any, text: str, markup: InlineKeyboardMarkup | None = None, *, edit: bool = False
+) -> Any:
+    """Update the bot's selection panel, falling back only when it cannot be edited."""
+    if edit:
+        try:
+            return await message.edit_text(text, reply_markup=markup)
+        except TelegramBadRequest as error:
+            if "message is not modified" in str(error).lower():
+                return message
+            # Old/inaccessible messages may need a fresh panel. Network errors do
+            # not trigger a blind duplicate send with an uncertain outcome.
+    return await message.answer(text, reply_markup=markup)
+
+
+async def answer_callback(callback: CallbackQuery, text: str | None = None) -> None:
+    try:
+        await callback.answer(text)
+    except TelegramAPIError:
         return

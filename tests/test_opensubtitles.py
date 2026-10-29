@@ -557,10 +557,11 @@ def test_unsafe_temporary_download_host_is_rejected() -> None:
     )
 
 
-def test_malformed_temporary_download_url_is_normalized() -> None:
-    session = FakeSession(
-        posts=[login_response(), link_response("https://opensubtitles.com:invalid/file.srt")]
-    )
+@pytest.mark.parametrize(
+    "link", ["https://opensubtitles.com:invalid/file.srt", "https://[invalid/file.srt"]
+)
+def test_malformed_temporary_download_url_is_normalized(link) -> None:
+    session = FakeSession(posts=[login_response(), link_response(link)])
 
     with pytest.raises(ProviderLinkError):
         asyncio.run(provider(session).download(candidate()))

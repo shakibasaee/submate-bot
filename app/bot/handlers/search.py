@@ -1,19 +1,26 @@
-"""Thin Telegram adapters for title and TV navigation workflows."""
+"""Title selection and cached, paginated inline navigation."""
 
 import structlog
 from aiogram import F, Router
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 
 from app.application.container import ApplicationServices
+from app.application.dto import NavigationOutcome, WorkflowStage
+from app.application.use_cases.navigate_series import NAVIGATION_PAGE_SIZE
+from app.bot.handlers.language import show_language_picker
+from app.bot.keyboards.common import flow_controls
 from app.bot.keyboards.media import (
     episodes_keyboard,
     result_label,
     results_keyboard,
     seasons_keyboard,
 )
-from app.bot.presentation import remove_inline_keyboard, safe_html_text
+from app.bot.presentation import answer_callback, render_panel
 from app.bot.presenters.errors import present_error
+from app.bot.presenters.navigation import send_navigation
 from app.bot.presenters.subtitles import send_subtitle_page
+from app.bot.presenters.workflow import recover_workflow, show_workflow
+from app.bot.texts import ui
 from app.core.logging import user_reference
 from app.domain.errors import ApplicationError
 from app.domain.models import MediaType, MovieRef, WorkflowId
@@ -29,170 +36,184 @@ async def title_search(message: Message, services: ApplicationServices) -> None:
     try:
         outcome = await services.search_titles.execute(message.from_user.id, message.text)
     except ApplicationError as error:
-        await message.answer(present_error(error))
-        return
-    if not outcome.results:
-        await message.answer("No movie or TV series matched that title. Try a different search.")
+        # A first-time user can choose the subtitle language directly.
+        if "Choose a subtitle language" in str(error):
+            picker = await services.choose_language.open_picker(message.from_user.id)
+            await show_language_picker(message, str(picker.workflow_id), stage=picker.stage)
+        else:
+            await message.answer(present_error(error))
         return
     logger.info(
         "title_search_completed",
         user_ref=user_reference(message.from_user.id),
         result_count=len(outcome.results),
     )
-    await message.answer(
-        "Which title did you mean?",
-        reply_markup=results_keyboard(outcome.results, outcome.workflow_id),
+    await send_navigation(
+        message,
+        NavigationOutcome(
+            outcome.workflow_id,
+            # Subtitle language is not used to choose interface labels.
+            language=outcome.language,
+            stage=WorkflowStage.CHOOSING_TITLE,
+            results=outcome.results,
+        ),
     )
 
 
 @router.callback_query(F.data.startswith("title:"))
 async def title_selected(callback: CallbackQuery, services: ApplicationServices) -> None:
-    if callback.from_user is None or callback.data is None:
-        await callback.answer()
+    if not callback.data or not isinstance(callback.message, Message):
+        await answer_callback(callback)
         return
-    parts = callback.data.split(":", 3)
-    if len(parts) != 4 or parts[2] not in {"movie", "tv"} or not parts[3]:
-        await callback.answer("That title selection is invalid.", show_alert=True)
+    parts = callback.data.split(":")
+    if len(parts) != 4 or parts[2] not in {"movie", "tv"}:
+        await answer_callback(callback, ui("stale"))
         return
-    await callback.answer()
-    message = callback.message
-    if not isinstance(message, Message):
-        return
-    await remove_inline_keyboard(message)
+    await answer_callback(callback)
+    workflow = WorkflowId(parts[1])
     try:
         outcome = await services.select_title.execute(
-            callback.from_user.id,
-            WorkflowId(parts[1]),
-            MediaType(parts[2]),
-            parts[3],
+            callback.from_user.id, workflow, MediaType(parts[2]), parts[3]
         )
+        if isinstance(outcome.selected, MovieRef) and outcome.subtitle_page is not None:
+            await send_subtitle_page(
+                callback.message,
+                outcome.subtitle_page,
+                title=outcome.selected.title,
+                language=outcome.subtitle_page.language,
+                edit=True,
+            )
+        else:
+            nav = await services.navigate_series.current_navigation(callback.from_user.id, workflow)
+            await send_navigation(callback.message, nav, edit=True)
     except ApplicationError as error:
-        await message.answer(present_error(error))
-        return
-    if isinstance(outcome.selected, MovieRef):
-        await message.answer(f"Selected: {safe_html_text(outcome.selected.title, 500)}")
-        if outcome.subtitle_page is None:
-            await message.answer("No subtitles found. Try another title.")
-            return
-        await send_subtitle_page(
-            message,
-            outcome.subtitle_page,
-            title=outcome.selected.title,
-            language=outcome.subtitle_page.language,
-        )
-        return
-    if not outcome.seasons:
-        await message.answer(
-            "This series has no regular seasons available. Specials (Season 0) are not selectable."
-        )
-        return
-    await message.answer(
-        "Choose a season:\nSpecials (Season 0) are not selectable.",
-        reply_markup=seasons_keyboard(outcome.seasons, outcome.workflow_id),
-    )
+        await recover_workflow(callback, services, workflow, error)
 
 
 @router.callback_query(F.data.startswith("season:"))
 async def season_selected(callback: CallbackQuery, services: ApplicationServices) -> None:
-    if callback.from_user is None or callback.data is None:
-        await callback.answer()
+    parts = (callback.data or "").split(":")
+    if len(parts) != 3 or not parts[2].isdigit() or not isinstance(callback.message, Message):
+        await answer_callback(callback, ui("stale"))
         return
-    parts = callback.data.split(":", 2)
-    if len(parts) != 3 or not parts[2].isdigit():
-        await callback.answer("That season selection is invalid.", show_alert=True)
-        return
-    await callback.answer()
-    message = callback.message
-    if not isinstance(message, Message):
-        return
-    await remove_inline_keyboard(message)
+    await answer_callback(callback)
+    workflow = WorkflowId(parts[1])
     try:
-        outcome = await services.navigate_series.select_season(
-            callback.from_user.id, WorkflowId(parts[1]), int(parts[2])
-        )
+        await services.navigate_series.select_season(callback.from_user.id, workflow, int(parts[2]))
+        nav = await services.navigate_series.current_navigation(callback.from_user.id, workflow)
+        await send_navigation(callback.message, nav, edit=True)
     except ApplicationError as error:
-        await message.answer(present_error(error))
-        return
-    if not outcome.episodes:
-        await message.answer("This season has no episodes available.")
-        return
-    season_number = outcome.episodes[0].season_number
-    await message.answer(
-        "Choose an episode:",
-        reply_markup=episodes_keyboard(
-            season_number,
-            tuple(item.episode_number for item in outcome.episodes),
-            outcome.workflow_id,
-        ),
-    )
+        await recover_workflow(callback, services, workflow, error)
 
 
 @router.callback_query(F.data.startswith("episode:"))
 async def episode_selected(callback: CallbackQuery, services: ApplicationServices) -> None:
-    if callback.from_user is None or callback.data is None:
-        await callback.answer()
+    parts = (callback.data or "").split(":")
+    if (
+        len(parts) != 4
+        or not all(p.isdigit() for p in parts[2:])
+        or not isinstance(callback.message, Message)
+    ):
+        await answer_callback(callback, ui("stale"))
         return
-    parts = callback.data.split(":", 3)
-    if len(parts) != 4 or not parts[2].isdigit() or not parts[3].isdigit():
-        await callback.answer("That episode selection is invalid.", show_alert=True)
-        return
-    await callback.answer()
-    message = callback.message
-    if not isinstance(message, Message):
-        return
-    await remove_inline_keyboard(message)
+    await answer_callback(callback)
+    workflow = WorkflowId(parts[1])
     try:
         outcome = await services.navigate_series.select_episode(
-            callback.from_user.id,
-            WorkflowId(parts[1]),
-            int(parts[2]),
-            int(parts[3]),
+            callback.from_user.id, workflow, int(parts[2]), int(parts[3])
+        )
+        await send_subtitle_page(
+            callback.message,
+            outcome.subtitle_page,
+            title=outcome.episode.series.title,
+            language=outcome.subtitle_page.language,
+            edit=True,
         )
     except ApplicationError as error:
-        await message.answer(present_error(error))
-        return
-    await message.answer(f"Selected episode: {safe_html_text(outcome.episode.name, 500)}")
-    await send_subtitle_page(
-        message,
-        outcome.subtitle_page,
-        title=outcome.episode.series.title,
-        language=outcome.subtitle_page.language,
-    )
+        await recover_workflow(callback, services, workflow, error)
 
 
 @router.callback_query(F.data.startswith("nav:"))
 async def navigation_action(callback: CallbackQuery, services: ApplicationServices) -> None:
-    if callback.from_user is None or callback.data is None:
-        await callback.answer()
+    parts = (callback.data or "").split(":")
+    if (
+        len(parts) != 3
+        or parts[2] not in {"back", "episodes", "titles", "resume", "cancel", "language", "search"}
+        or not isinstance(callback.message, Message)
+    ):
+        await answer_callback(callback, ui("stale"))
         return
-    parts = callback.data.split(":", 2)
-    if len(parts) != 3 or parts[2] not in {"back", "cancel"}:
-        await callback.answer("That navigation action is invalid.", show_alert=True)
-        return
-    await callback.answer("Cancelled." if parts[2] == "cancel" else None)
-    message = callback.message
-    if isinstance(message, Message):
-        await remove_inline_keyboard(message)
+    workflow, action = WorkflowId(parts[1]), parts[2]
+    await answer_callback(callback)
     try:
-        if parts[2] == "cancel":
-            await services.cancel_workflow.execute(callback.from_user.id)
-            if isinstance(message, Message):
-                await message.answer(
-                    "Current action cancelled. Use /language when you are ready to search."
+        if action in {"search", "cancel"}:
+            result = await services.start_search.execute(callback.from_user.id, workflow)
+            if result.language is None:
+                await show_language_picker(
+                    callback.message, str(result.workflow_id), stage=WorkflowStage.IDLE, edit=True
+                )
+            else:
+                assert result.workflow_id is not None
+                await render_panel(
+                    callback.message,
+                    ui("title"),
+                    InlineKeyboardMarkup(inline_keyboard=flow_controls(result.workflow_id)),
+                    edit=True,
                 )
             return
-        seasons = await services.navigate_series.back_to_seasons(
-            callback.from_user.id, WorkflowId(parts[1])
-        )
+        if action == "language":
+            picker = await services.choose_language.open_picker(callback.from_user.id, workflow)
+            await show_language_picker(
+                callback.message, str(picker.workflow_id), stage=picker.stage, edit=True
+            )
+            return
+        methods = {
+            "back": services.navigate_series.back_to_seasons,
+            "episodes": services.navigate_series.back_to_episodes,
+            "titles": services.navigate_series.back_to_titles,
+            "resume": services.navigate_series.current_navigation,
+        }
+        outcome = await methods[action](callback.from_user.id, workflow)
+        await show_workflow(callback.message, services, callback.from_user.id, outcome)
     except ApplicationError as error:
-        if isinstance(message, Message):
-            await message.answer(present_error(error))
+        await recover_workflow(callback, services, workflow, error)
+
+
+@router.callback_query(F.data.startswith("page:"))
+async def page_selected(callback: CallbackQuery, services: ApplicationServices) -> None:
+    parts = (callback.data or "").split(":")
+    if len(parts) != 4 or not parts[3].isdigit() or not isinstance(callback.message, Message):
+        await answer_callback(callback, ui("stale"))
         return
-    if isinstance(message, Message):
-        await message.answer(
-            "Choose a season:",
-            reply_markup=seasons_keyboard(seasons, WorkflowId(parts[1])),
-        )
+    workflow, kind, page = WorkflowId(parts[1]), parts[2], int(parts[3])
+    await answer_callback(callback)
+    try:
+        if kind == "info":
+            await services.navigate_series.current_navigation(
+                callback.from_user.id, workflow, rotate=False
+            )
+            return
+        if kind == "u":
+            outcome = await services.find_subtitles.page_at(
+                callback.from_user.id, workflow, page * 5
+            )
+            await send_subtitle_page(
+                callback.message, outcome, title="this title", language=outcome.language, edit=True
+            )
+        elif kind in {"t", "s", "e"}:
+            stage = {
+                "t": WorkflowStage.CHOOSING_TITLE,
+                "s": WorkflowStage.CHOOSING_SEASON,
+                "e": WorkflowStage.CHOOSING_EPISODE,
+            }[kind]
+            nav = await services.navigate_series.page_at(
+                callback.from_user.id, workflow, stage, page * NAVIGATION_PAGE_SIZE
+            )
+            await send_navigation(callback.message, nav, edit=True)
+        else:
+            await answer_callback(callback, ui("stale"))
+    except ApplicationError as error:
+        await recover_workflow(callback, services, workflow, error)
 
 
 __all__ = [

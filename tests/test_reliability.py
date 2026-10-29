@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 import structlog
 
 from app.bot.handlers.privacy import PRIVACY_NOTICE, privacy_command
+from app.bot.texts import ui
 from app.core.config import Settings
 from app.core.health import HealthServer
 from app.core.logging import configure_logging, redact_sensitive, user_reference
@@ -114,4 +115,4 @@ def test_privacy_command_includes_provider_and_copyright_notice() -> None:
 
     assert "OpenSubtitles.com" in PRIVACY_NOTICE
     assert "Copyright" in PRIVACY_NOTICE
-    message.answer.assert_awaited_once_with(PRIVACY_NOTICE)
+    message.answer.assert_awaited_once_with(ui("privacy_notice"))

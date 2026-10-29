@@ -53,7 +53,7 @@ def test_delivery_consumes_candidate_once_and_generates_safe_filename() -> None:
         delivered = await app.services.deliver_subtitle.execute(
             7, search.workflow_id, ProviderId("fake"), 0
         )
-        assert delivered.subtitle.filename == "Show A B-en.srt"
+        assert delivered.subtitle.filename == "Show A B-2020-en.srt"
         with pytest.raises(WorkflowExpiredError):
             await app.services.deliver_subtitle.execute(
                 7, search.workflow_id, ProviderId("fake"), 0

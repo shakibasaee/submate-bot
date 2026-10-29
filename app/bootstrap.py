@@ -14,6 +14,7 @@ from app.application.container import ApplicationServices
 from app.application.dto import ApplicationLimits
 from app.application.ports.metadata import MetadataGateway
 from app.application.ports.preferences import PreferenceRepository
+from app.application.ports.providers import SubtitleProvider
 from app.application.use_cases import (
     CancelWorkflow,
     ChooseLanguage,
@@ -24,6 +25,7 @@ from app.application.use_cases import (
     SelectTitle,
     StartSearch,
 )
+from app.application.use_cases.interface_preferences import InterfacePreferences
 from app.core.config import Settings
 from app.domain.errors import ConfigurationError, MetadataError
 from app.domain.models import EpisodeRef, MediaSearchResult, SeasonSummary, SeriesRef
@@ -38,7 +40,9 @@ from app.infrastructure.persistence.memory import (
 )
 from app.infrastructure.persistence.postgres import PostgresPreferenceRepository
 from app.infrastructure.persistence.sqlite import SqlitePreferenceRepository
+from app.infrastructure.providers.demo import DemoSubtitleProvider
 from app.infrastructure.providers.opensubtitles import OpenSubtitlesProvider
+from app.infrastructure.providers.subdl import SubdlProvider
 
 logger = structlog.get_logger(__name__)
 
@@ -60,7 +64,9 @@ class UnconfiguredSubtitleProvider:
         return ProviderId("unconfigured")
 
     async def search(self, query: SubtitleQuery) -> list[SubtitleCandidate]:
-        raise ConfigurationError("Subtitle search is not configured yet. Please try again later.")
+        raise ConfigurationError(
+            "Subtitle search is unavailable because the operator has not configured OpenSubtitles."
+        )
 
     async def download(self, candidate: SubtitleCandidate) -> DownloadedSubtitle:
         raise ConfigurationError("Subtitle delivery is not configured yet. Please try again later.")
@@ -177,9 +183,17 @@ async def build_runtime(settings: Settings) -> ApplicationRuntime:
                 cache_ttl_seconds=settings.tmdb_cache_ttl_seconds,
             )
 
-        providers: tuple[OpenSubtitlesProvider | UnconfiguredSubtitleProvider, ...]
+        providers: tuple[SubtitleProvider, ...]
         opensubtitles_key = settings.opensubtitles_api_key
-        if opensubtitles_key is not None and not opensubtitles_key.get_secret_value().startswith(
+        if settings.demo_mode:
+            providers = (DemoSubtitleProvider(),)
+        elif (
+            settings.subdl_api_key is not None
+            and settings.subdl_api_key.get_secret_value().strip()
+            and not settings.subdl_api_key.get_secret_value().startswith("replace-")
+        ):
+            providers = (SubdlProvider(session, settings.subdl_api_key.get_secret_value()),)
+        elif opensubtitles_key is not None and not opensubtitles_key.get_secret_value().startswith(
             "replace-"
         ):
             providers = (
@@ -217,6 +231,7 @@ async def build_runtime(settings: Settings) -> ApplicationRuntime:
             global_limit=settings.global_subtitle_limit_per_minute,
         )
         services = ApplicationServices(
+            interface_preferences=InterfacePreferences(conversations, preferences, locks),
             start_search=StartSearch(conversations, preferences, locks),
             choose_language=ChooseLanguage(conversations, preferences, locks),
             search_titles=SearchTitles(

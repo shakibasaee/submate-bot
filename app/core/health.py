@@ -35,6 +35,15 @@ class HealthServer:
                 )
             ),
         }
+        self.demo_mode = settings.demo_mode
+        if settings.demo_mode:
+            self.providers_configured = {"tmdb": self.providers_configured["tmdb"], "demo": True}
+        elif (
+            settings.subdl_api_key is not None
+            and settings.subdl_api_key.get_secret_value().strip()
+            and not settings.subdl_api_key.get_secret_value().startswith("replace-")
+        ):
+            self.providers_configured = {"tmdb": self.providers_configured["tmdb"], "subdl": True}
         self._dependency_health = dependency_health
         self._runner: web.AppRunner | None = None
 
@@ -47,6 +56,7 @@ class HealthServer:
         ready = dependency_health.pop("ready") and providers_ready
         payload = {
             "status": "ready" if ready else "degraded",
+            "mode": "demo" if self.demo_mode else "live",
             "dependencies": dependency_health,
             "providers": {
                 name: "configured" if configured else "missing"

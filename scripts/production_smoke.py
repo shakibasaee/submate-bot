@@ -36,6 +36,18 @@ async def authenticate_telegram(token: str) -> int:
 
 def providers_are_configured(settings: Settings) -> bool:
     """Return whether both providers have non-placeholder credentials."""
+    if settings.demo_mode:
+        return False  # A production smoke pass must never imply sample captions are real.
+    if (
+        settings.subdl_api_key is not None
+        and settings.subdl_api_key.get_secret_value().strip()
+        and not settings.subdl_api_key.get_secret_value().startswith("replace-")
+    ):
+        return bool(
+            settings.tmdb_api_key
+            and settings.tmdb_api_key.get_secret_value().strip()
+            and not settings.tmdb_api_key.get_secret_value().startswith("replace-")
+        )
     return all(
         secret is not None
         and bool(secret.get_secret_value().strip())

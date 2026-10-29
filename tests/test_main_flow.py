@@ -55,7 +55,7 @@ def test_movie_flow_reaches_provider_neutral_delivery() -> None:
         delivery = await app.services.deliver_subtitle.execute(
             1, search.workflow_id, ProviderId("fake"), 0
         )
-        assert delivery.subtitle.filename == "Inception-en.srt"
+        assert delivery.subtitle.filename == "Inception-2010-en.srt"
         assert delivery.subtitle.content == VALID_SRT
 
     asyncio.run(flow())

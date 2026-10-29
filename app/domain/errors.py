@@ -5,6 +5,10 @@ class ApplicationError(Exception):
     """Base failure safe to map to a user-facing category."""
 
 
+class PreferenceUnavailableError(ApplicationError):
+    """Preference storage failed; the original database exception stays private."""
+
+
 class InvalidInputError(ApplicationError):
     pass
 
@@ -74,4 +78,26 @@ class ProviderLinkError(ProviderResponseError):
 
 
 class UnsafeSubtitleError(ProviderError):
-    pass
+    reason = "unsafe"
+
+
+class MalformedSubtitleError(UnsafeSubtitleError):
+    reason = "malformed"
+
+
+class UnsupportedSubtitleError(UnsafeSubtitleError):
+    reason = "unsupported"
+
+
+class SubtitleDecodingError(UnsafeSubtitleError):
+    reason = "decoding"
+
+
+class UnsafeSubtitleContentError(UnsafeSubtitleError):
+    reason = "unsafe_content"
+
+
+class UnsafeSubtitleLinkError(UnsafeSubtitleError, ProviderLinkError):
+    """A permanently rejected destination, rather than an expired provider link."""
+
+    reason = "unsafe_link"

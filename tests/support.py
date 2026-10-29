@@ -13,6 +13,7 @@ from app.application.use_cases import (
     SelectTitle,
     StartSearch,
 )
+from app.application.use_cases.interface_preferences import InterfacePreferences
 from app.domain.models import EpisodeRef, MediaSearchResult, SeasonSummary, SeriesRef
 from app.domain.subtitles import (
     DownloadedSubtitle,
@@ -89,6 +90,7 @@ def build_test_application(
     provider = provider or FakeProvider()
     find = FindSubtitles(conversations, (provider,), limiter, locks)
     services = ApplicationServices(
+        interface_preferences=InterfacePreferences(conversations, preferences, locks),
         start_search=StartSearch(conversations, preferences, locks),
         choose_language=ChooseLanguage(conversations, preferences, locks),
         search_titles=SearchTitles(conversations, metadata, limiter, locks),

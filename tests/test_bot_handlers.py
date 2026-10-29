@@ -6,10 +6,12 @@ from unittest.mock import AsyncMock
 
 from aiogram.types import Message
 
+from app.bot.handlers.interface import interface_selected
 from app.bot.handlers.language import (
     LANGUAGE_PROMPT,
     TITLE_PROMPT,
     cancel_command,
+    language_command,
     language_selected,
 )
 from app.bot.handlers.search import (
@@ -54,6 +56,9 @@ class CallbackStub:
 def telegram_message() -> AsyncMock:
     message = AsyncMock(spec=Message)
     message.answer = AsyncMock()
+    # Existing transition tests record panel rendering via one presentation mock.
+    # Dedicated UI tests keep edit_text/answer distinct to verify Telegram editing.
+    message.edit_text = message.answer
     message.answer_document = AsyncMock()
     message.edit_reply_markup = AsyncMock()
     return message
@@ -68,21 +73,32 @@ def test_start_language_search_and_cancel_commands_use_application_services() ->
     async def scenario() -> None:
         start = MessageStub(1)
         await start_command(start, app.services)  # type: ignore[arg-type]
+        assert "Choose your interface language" in start.answer.await_args.args[0]
+        interface = CallbackStub(
+            1, start.answer.await_args.kwargs["reply_markup"].inline_keyboard[0][0].callback_data
+        )
+        interface.message = telegram_message()
+        await interface_selected(interface, app.services)
+        assert "SubMate" in interface.message.answer.await_args.args[0]
+        assert len(interface.message.answer.await_args.kwargs["reply_markup"].keyboard) == 2
+        await language_command(start, app.services)
         assert start.answer.await_args.args[0] == LANGUAGE_PROMPT
 
-        language = CallbackStub(1, "language:en")
+        picker = start.answer.await_args.kwargs["reply_markup"]
+        language = CallbackStub(1, picker.inline_keyboard[0][1].callback_data)
+        language.message = telegram_message()
         await language_selected(language, app.services)  # type: ignore[arg-type]
         assert TITLE_PROMPT in language.message.answer.await_args.args[0]
 
         search = MessageStub(1, "Inception")
         await title_search(search, app.services)  # type: ignore[arg-type]
-        assert search.answer.await_args.args[0] == "Which title did you mean?"
+        assert "عنوان درست" in search.answer.await_args.args[0]
         keyboard = search.answer.await_args.kwargs["reply_markup"]
         assert keyboard.inline_keyboard[0][0].callback_data.startswith("title:")
 
         cancel = MessageStub(1)
         await cancel_command(cancel, app.services)  # type: ignore[arg-type]
-        assert "cancelled" in cancel.answer.await_args.args[0]
+        assert "لغو" in cancel.answer.await_args.args[0]
 
     asyncio.run(scenario())
 
@@ -182,7 +198,7 @@ def test_tv_callbacks_navigate_season_episode_and_show_subtitles() -> None:
             message=message,
         )
         await episode_selected(episode_callback, app.services)  # type: ignore[arg-type]
-        assert "Episode &lt;Three&gt;" in message.answer.await_args_list[-2].args[0]
+        assert "S02E03" in message.answer.await_args.args[0]
         assert "reply_markup" in message.answer.await_args_list[-1].kwargs
 
     asyncio.run(scenario())

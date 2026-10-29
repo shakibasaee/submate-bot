@@ -2,6 +2,7 @@
 
 import asyncio
 import re
+import unicodedata
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from urllib.parse import urlparse
@@ -11,6 +12,7 @@ import aiohttp
 from app.application.ports.cache import Cache
 from app.core.retry import retry_async
 from app.domain.errors import (
+    MalformedSubtitleError,
     ProviderAuthenticationError,
     ProviderConfigurationError,
     ProviderError,
@@ -21,8 +23,13 @@ from app.domain.errors import (
     ProviderResponseError,
     ProviderTimeoutError,
     ProviderUnavailableError,
+    SubtitleDecodingError,
+    UnsafeSubtitleContentError,
     UnsafeSubtitleError,
+    UnsafeSubtitleLinkError,
+    UnsupportedSubtitleError,
 )
+from app.domain.languages import LanguageCode
 from app.domain.models import EpisodeRef, MovieRef
 from app.domain.subtitles import (
     DownloadedSubtitle,
@@ -94,25 +101,32 @@ def _tmdb_id(value: str, *, label: str) -> int:
     return result
 
 
-def validate_srt(content: bytes) -> bytes:
+def validate_srt(content: bytes, language: LanguageCode | None = None) -> bytes:
     if not content:
-        raise UnsafeSubtitleError("subtitle file is empty")
+        raise MalformedSubtitleError("subtitle file is empty")
     if len(content) > MAX_SUBTITLE_BYTES:
         raise UnsafeSubtitleError("subtitle file is too large")
     if content.startswith((b"PK\x03\x04", b"Rar!", b"7z\xbc\xaf\x27\x1c", b"\x1f\x8b")):
-        raise UnsafeSubtitleError("archives are not accepted")
-    text: str | None = None
-    for encoding in ("utf-8-sig", "utf-16", "cp1256", "cp1252"):
+        raise UnsupportedSubtitleError("archives are not accepted")
+    encoding = "utf-16" if content.startswith((b"\xff\xfe", b"\xfe\xff")) else "utf-8-sig"
+    try:
+        text = content.decode(encoding)
+    except UnicodeDecodeError:
+        # A declared Unicode encoding must never silently fall back to a legacy codec.
+        if content.startswith((b"\xff\xfe", b"\xfe\xff", b"\xef\xbb\xbf")) or language is None:
+            raise SubtitleDecodingError("subtitle encoding is invalid or unsupported") from None
         try:
-            candidate = content.decode(encoding)
+            text = content.decode("cp1256" if language is LanguageCode.PERSIAN else "cp1252")
         except UnicodeDecodeError:
-            continue
-        controls = sum(char < " " and char not in "\r\n\t" for char in candidate)
-        if controls <= max(2, len(candidate) // 100) and SRT_TIMECODE.search(candidate):
-            text = candidate
-            break
-    if text is None:
-        raise UnsafeSubtitleError("file is not a valid SRT subtitle")
+            raise SubtitleDecodingError("subtitle encoding is invalid or unsupported") from None
+    if any(unicodedata.category(char) == "Cc" and char not in "\r\n\t" for char in text):
+        raise UnsafeSubtitleContentError("subtitle contains unsafe control characters")
+    if re.search(r"<\s*(?:script|iframe|object|embed|svg|html|body|!doctype)\b", text, re.I):
+        raise UnsafeSubtitleContentError("subtitle contains active markup or a web page")
+    if text.lstrip().startswith(("WEBVTT", "[Script Info]")):
+        raise UnsupportedSubtitleError("only SRT subtitle content is supported")
+    if not SRT_TIMECODE.search(text):
+        raise MalformedSubtitleError("file is not a valid SRT subtitle")
     normalized = text.replace("\r\n", "\n").replace("\r", "\n")
     blocks = re.split(r"\n\s*\n", normalized.strip())
     timestamp = r"(\d{1,2}):([0-5]\d):([0-5]\d)[,.](\d{3})"
@@ -120,25 +134,25 @@ def validate_srt(content: bytes) -> bytes:
     for block in blocks:
         lines = block.strip().splitlines()
         if len(lines) < 3 or not lines[0].strip().isdigit():
-            raise UnsafeSubtitleError("invalid SRT cue structure")
+            raise MalformedSubtitleError("invalid SRT cue structure")
         match = cue.fullmatch(lines[1].strip())
         if match is None or not any(line.strip() for line in lines[2:]):
-            raise UnsafeSubtitleError("invalid SRT cue content")
+            raise MalformedSubtitleError("invalid SRT cue content")
         values = tuple(map(int, match.groups()))
         start = ((values[0] * 60 + values[1]) * 60 + values[2]) * 1000 + values[3]
         end = ((values[4] * 60 + values[5]) * 60 + values[6]) * 1000 + values[7]
         if end <= start:
-            raise UnsafeSubtitleError("invalid SRT cue duration")
+            raise MalformedSubtitleError("invalid SRT cue duration")
     return normalized.encode("utf-8")
 
 
 def _validate_download_url(url: str) -> None:
-    parsed = urlparse(url)
-    host = (parsed.hostname or "").lower()
     try:
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower()
         port = parsed.port
     except ValueError:
-        raise ProviderLinkError("provider returned an invalid download link") from None
+        raise UnsafeSubtitleLinkError("provider returned an invalid download link") from None
     if (
         parsed.scheme != "https"
         or parsed.username is not None
@@ -146,7 +160,7 @@ def _validate_download_url(url: str) -> None:
         or port not in {None, 443}
         or not (host == "opensubtitles.com" or host.endswith(".opensubtitles.com"))
     ):
-        raise ProviderLinkError("provider returned an invalid download link")
+        raise UnsafeSubtitleLinkError("provider returned an invalid download link")
 
 
 def map_subtitles(payload: dict[str, object], query: SubtitleQuery) -> list[SubtitleCandidate]:
@@ -158,6 +172,24 @@ def map_subtitles(payload: dict[str, object], query: SubtitleQuery) -> list[Subt
         if not isinstance(item, dict) or not isinstance(item.get("attributes"), dict):
             continue
         attributes = item["attributes"]
+        if attributes.get("language", str(query.language)) != str(query.language):
+            continue
+        details = attributes.get("feature_details")
+        if isinstance(details, dict):
+            media = query.media
+            expected = {"tmdb_id": media.external_id}
+            if isinstance(media, EpisodeRef):
+                expected.update(
+                    {
+                        "parent_tmdb_id": media.series.external_id,
+                        "season_number": str(media.season_number),
+                        "episode_number": str(media.episode_number),
+                    }
+                )
+            if any(
+                key in details and str(details[key]) != value for key, value in expected.items()
+            ):
+                continue
         files = attributes.get("files", [])
         if not isinstance(files, list):
             continue
@@ -486,7 +518,7 @@ class OpenSubtitlesProvider:
                 await self._refresh_authentication(authentication.token)
         raise RuntimeError("authentication retry loop ended unexpectedly")  # pragma: no cover
 
-    async def _download_content(self, link: str) -> bytes:
+    async def _download_content(self, link: str, language: LanguageCode | None = None) -> bytes:
         async def request() -> bytes:
             try:
                 async with self._session.get(link, allow_redirects=False) as response:
@@ -519,7 +551,7 @@ class OpenSubtitlesProvider:
                 raise _TransientProviderFailure(
                     ProviderUnavailableError("OpenSubtitles subtitle download failed")
                 ) from error
-            return validate_srt(b"".join(chunks))
+            return validate_srt(b"".join(chunks), language)
 
         return await self._retry_transient(request)
 
@@ -528,7 +560,7 @@ class OpenSubtitlesProvider:
             raise ProviderLinkError("candidate belongs to another provider")
         link = await self._download_link(candidate.provider_file_ref)
         return DownloadedSubtitle(
-            content=await self._download_content(link),
+            content=await self._download_content(link, candidate.language),
             filename="subtitle.srt",
             format="srt",
             attribution=candidate.attribution,

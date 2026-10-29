@@ -8,3 +8,10 @@ class LanguageCode(StrEnum):
 
     ENGLISH = "en"
     PERSIAN = "fa"
+
+
+class InterfaceLanguage(StrEnum):
+    """A UI preference, never a subtitle-provider language selection."""
+
+    ENGLISH = "en"
+    PERSIAN = "fa"

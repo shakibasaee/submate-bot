@@ -5,6 +5,7 @@ import json
 
 from aiogram import Bot
 
+from app.application.ports.providers import SubtitleProvider
 from app.bootstrap import build_runtime
 from app.core.config import get_settings
 from app.core.logging import configure_logging
@@ -13,7 +14,9 @@ from app.domain.models import MediaType, MovieRef, SeriesRef
 from app.domain.subtitles import SubtitleQuery
 from app.infrastructure.cache.memory import InMemoryCache
 from app.infrastructure.metadata.tmdb import TmdbMetadataGateway
+from app.infrastructure.providers.demo import DemoSubtitleProvider
 from app.infrastructure.providers.opensubtitles import OpenSubtitlesProvider
+from app.infrastructure.providers.subdl import SubdlProvider
 
 
 def report(check: str, status: str) -> None:
@@ -24,13 +27,20 @@ async def run() -> None:
     settings = get_settings()
     configure_logging("WARNING")
     configured = True
-    for name in (
-        "telegram_bot_token",
-        "tmdb_api_key",
-        "opensubtitles_api_key",
-        "opensubtitles_username",
-        "opensubtitles_password",
-    ):
+    subdl = bool(
+        settings.subdl_api_key
+        and settings.subdl_api_key.get_secret_value().strip()
+        and not settings.subdl_api_key.get_secret_value().startswith("replace-")
+    )
+    names = ["telegram_bot_token", "tmdb_api_key"]
+    if not settings.demo_mode:
+        names.extend(
+            ["subdl_api_key"]
+            if subdl
+            else ["opensubtitles_api_key", "opensubtitles_username", "opensubtitles_password"]
+        )
+    report("mode", "DEMO: original sample captions only" if settings.demo_mode else "live provider")
+    for name in names:
         secret = getattr(settings, name)
         if (
             secret is None
@@ -74,16 +84,25 @@ async def run() -> None:
             return
         if not configured:
             return
-        assert settings.opensubtitles_api_key is not None
-        assert settings.opensubtitles_username is not None
-        assert settings.opensubtitles_password is not None
-        provider = OpenSubtitlesProvider(
-            runtime.http_session,
-            settings.opensubtitles_api_key.get_secret_value(),
-            InMemoryCache(),
-            username=settings.opensubtitles_username.get_secret_value(),
-            password=settings.opensubtitles_password.get_secret_value(),
-        )
+        provider: SubtitleProvider
+        if settings.demo_mode:
+            provider = DemoSubtitleProvider()
+        elif subdl:
+            assert settings.subdl_api_key is not None
+            provider = SubdlProvider(
+                runtime.http_session, settings.subdl_api_key.get_secret_value()
+            )
+        else:
+            assert settings.opensubtitles_api_key is not None
+            assert settings.opensubtitles_username is not None
+            assert settings.opensubtitles_password is not None
+            provider = OpenSubtitlesProvider(
+                runtime.http_session,
+                settings.opensubtitles_api_key.get_secret_value(),
+                InMemoryCache(),
+                username=settings.opensubtitles_username.get_secret_value(),
+                password=settings.opensubtitles_password.get_secret_value(),
+            )
         movie = next(
             item for item in movies if item.media_type is MediaType.MOVIE and item.year == "2010"
         )
@@ -105,7 +124,11 @@ async def run() -> None:
                 downloaded = await provider.download(candidate)
                 report(
                     label,
-                    "authenticated download; validated SRT in memory"
+                    (
+                        "DEMO sample validated, not real movie dialogue"
+                        if settings.demo_mode
+                        else "live provider download; validated SRT in memory"
+                    )
                     if downloaded.content
                     else "empty",
                 )

@@ -1,11 +1,14 @@
 """Validate and select one displayed movie or series."""
 
+from uuid import uuid4
+
 from app.application.dto import TitleSelectionOutcome, WorkflowStage
 from app.application.ports.conversations import ConversationRepository
 from app.application.ports.locks import UserLockManager
 from app.application.ports.metadata import MetadataGateway
 from app.application.use_cases.find_subtitles import FindSubtitles
-from app.domain.errors import WorkflowExpiredError
+from app.domain.errors import ApplicationError, WorkflowExpiredError
+from app.domain.languages import LanguageCode
 from app.domain.models import MediaType, MovieRef, SeriesRef, WorkflowId
 
 
@@ -46,22 +49,45 @@ class SelectTitle:
                 selected = MovieRef(result.external_id, result.title, result.year)
                 updated = conversation.evolve(
                     selected_media=selected,
-                    search_results=(),
+                    season_offset=0,
+                    episode_offset=0,
                 )
-                page = await self._find_subtitles.find_for(updated)
+                try:
+                    page = await self._find_subtitles.find_for(updated)
+                except ApplicationError:
+                    await self._conversations.save(
+                        conversation.evolve(
+                            workflow_id=WorkflowId(uuid4().hex), recovery_from=workflow_id
+                        )
+                    )
+                    raise
                 return TitleSelectionOutcome(
                     workflow_id,
                     selected,
                     subtitle_page=page,
                 )
             selected = SeriesRef(result.external_id, result.title, result.year)
-            seasons = tuple(await self._metadata.seasons(selected))
+            try:
+                seasons = tuple(await self._metadata.seasons(selected))
+            except ApplicationError:
+                await self._conversations.save(
+                    conversation.evolve(
+                        workflow_id=WorkflowId(uuid4().hex), recovery_from=workflow_id
+                    )
+                )
+                raise
             await self._conversations.save(
                 conversation.evolve(
                     stage=WorkflowStage.CHOOSING_SEASON,
                     selected_media=selected,
-                    search_results=(),
                     seasons=seasons,
+                    season_offset=0,
+                    episode_offset=0,
                 )
             )
-            return TitleSelectionOutcome(workflow_id, selected, seasons=seasons)
+            return TitleSelectionOutcome(
+                workflow_id,
+                selected,
+                seasons=seasons,
+                language=conversation.language or LanguageCode.ENGLISH,
+            )

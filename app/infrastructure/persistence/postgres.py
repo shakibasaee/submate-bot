@@ -3,13 +3,21 @@
 from psycopg import Error as PsycopgError
 from psycopg_pool import AsyncConnectionPool
 
-from app.domain.languages import LanguageCode
+from app.domain.languages import InterfaceLanguage, LanguageCode
 from app.infrastructure.persistence.memory import InMemoryPreferenceRepository
 
 PREFERENCE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS user_preferences (
     telegram_user_id BIGINT PRIMARY KEY,
     subtitle_language VARCHAR(8) NOT NULL CHECK (subtitle_language IN ('en', 'fa')),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+)
+"""
+
+INTERFACE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS user_interface_preferences (
+    telegram_user_id BIGINT PRIMARY KEY,
+    interface_language VARCHAR(8) NOT NULL CHECK (interface_language IN ('en', 'fa')),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 )
 """
@@ -27,6 +35,7 @@ class PostgresPreferenceRepository:
     async def ensure_schema(self) -> None:
         async with self._pool.connection(timeout=3) as connection:
             await connection.execute(PREFERENCE_SCHEMA)
+            await connection.execute(INTERFACE_SCHEMA)
 
     async def get_language(self, user_id: int) -> LanguageCode | None:
         try:
@@ -62,3 +71,33 @@ class PostgresPreferenceRepository:
 
     async def close(self) -> None:
         return None
+
+    async def get_interface_language(self, user_id: int) -> InterfaceLanguage | None:
+        try:
+            async with self._pool.connection(timeout=3) as connection:
+                cursor = await connection.execute(
+                    "SELECT interface_language FROM user_interface_preferences "
+                    "WHERE telegram_user_id = %s",
+                    (user_id,),
+                )
+                row = await cursor.fetchone()
+            if row and row[0] in {"en", "fa"}:
+                language = InterfaceLanguage(str(row[0]))
+                await self._fallback.set_interface_language(user_id, language)
+                return language
+        except (PsycopgError, TimeoutError):
+            pass
+        return await self._fallback.get_interface_language(user_id)
+
+    async def set_interface_language(self, user_id: int, language: InterfaceLanguage) -> None:
+        await self._fallback.set_interface_language(user_id, language)
+        try:
+            async with self._pool.connection(timeout=3) as connection:
+                await connection.execute(
+                    "INSERT INTO user_interface_preferences (telegram_user_id, interface_language) "
+                    "VALUES (%s, %s) ON CONFLICT(telegram_user_id) DO UPDATE SET "
+                    "interface_language = EXCLUDED.interface_language, updated_at = NOW()",
+                    (user_id, str(language)),
+                )
+        except (PsycopgError, TimeoutError):
+            return

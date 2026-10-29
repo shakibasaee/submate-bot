@@ -1,25 +1,20 @@
-"""Thin Telegram adapter for subtitle pagination and delivery."""
+"""Atomic download claims and updates to one Telegram selection panel."""
 
 import structlog
 from aiogram import F, Router
-from aiogram.exceptions import TelegramAPIError
-from aiogram.types import (
-    BufferedInputFile,
-    CallbackQuery,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-    Message,
-)
+from aiogram.exceptions import TelegramAPIError, TelegramNetworkError, TelegramServerError
+from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardMarkup, Message
 
 from app.application.container import ApplicationServices
-from app.bot.handlers.language import TITLE_PROMPT, show_language_picker
-from app.bot.keyboards.subtitles import subtitle_keyboard, subtitle_label
-from app.bot.presentation import remove_inline_keyboard, safe_caption
-from app.bot.presenters.errors import present_error
+from app.bot.handlers.language import show_language_picker
+from app.bot.keyboards.common import flow_controls
+from app.bot.keyboards.subtitles import recovery_keyboard, subtitle_keyboard, subtitle_label
+from app.bot.presentation import answer_callback, render_panel, safe_caption
+from app.bot.presenters.errors import present_error, retryable
 from app.bot.presenters.subtitles import send_subtitle_page
-from app.core.logging import user_reference
+from app.bot.texts import ui
 from app.core.monitoring import monitoring
-from app.domain.errors import ApplicationError
+from app.domain.errors import ApplicationError, UnsafeSubtitleError, WorkflowExpiredError
 from app.domain.models import WorkflowId
 from app.domain.subtitles import ProviderId
 
@@ -27,139 +22,186 @@ router = Router(name=__name__)
 logger = structlog.get_logger(__name__)
 
 
-@router.callback_query(F.data.startswith("subtitle:"))
+async def download_error(
+    callback: CallbackQuery,
+    services: ApplicationServices,
+    message: Message,
+    workflow: WorkflowId,
+    provider: str,
+    index: str,
+    error: ApplicationError,
+) -> None:
+    if isinstance(error, WorkflowExpiredError):
+        await answer_callback(callback, ui("stale"))
+        return
+    try:
+        page = await services.deliver_subtitle.recovery_page(callback.from_user.id, workflow)
+    except ApplicationError:
+        await answer_callback(callback, ui("stale"))
+        return
+    retry = f"subtitle:{page.workflow_id}:{provider}:{index}" if retryable(error) else None
+    await render_panel(
+        message,
+        present_error(error),
+        recovery_keyboard(page, retry, invalid=isinstance(error, UnsafeSubtitleError)),
+        edit=True,
+    )
+
+
+@router.callback_query(F.data.startswith("receipt:"))
+async def receipt_selected(callback: CallbackQuery, services: ApplicationServices) -> None:
+    if not isinstance(callback.message, Message):
+        return
+    try:
+        page = await services.deliver_subtitle.acknowledge(
+            callback.from_user.id, WorkflowId((callback.data or "").split(":", 1)[1])
+        )
+        await answer_callback(callback)
+        await render_panel(
+            callback.message,
+            ui("receipt_resolved"),
+            recovery_keyboard(page, success=True),
+            edit=True,
+        )
+    except ApplicationError:
+        await answer_callback(callback, ui("stale"))
+
+
+@router.callback_query(F.data.startswith("uncertain_search:"))
+async def uncertain_search_selected(callback: CallbackQuery, services: ApplicationServices) -> None:
+    if not isinstance(callback.message, Message):
+        return
+    try:
+        result = await services.start_search.execute(
+            callback.from_user.id, WorkflowId((callback.data or "").split(":", 1)[1])
+        )
+        await answer_callback(callback)
+        assert result.workflow_id is not None
+        await render_panel(
+            callback.message,
+            ui("title"),
+            InlineKeyboardMarkup(inline_keyboard=flow_controls(result.workflow_id)),
+            edit=True,
+        )
+    except ApplicationError:
+        await answer_callback(callback, ui("stale"))
+
+
+@router.callback_query(F.data.startswith("subtitle:") | F.data.startswith("resend:"))
 async def subtitle_selected(callback: CallbackQuery, services: ApplicationServices) -> None:
-    if callback.from_user is None or callback.data is None:
-        await callback.answer()
+    if not callback.data or not isinstance(callback.message, Message):
+        await answer_callback(callback)
         return
     parts = callback.data.split(":", 3)
     if len(parts) != 4:
-        await callback.answer("That subtitle selection is invalid.", show_alert=True)
+        await answer_callback(callback, ui("stale"))
         return
-    workflow_id = WorkflowId(parts[1])
-    provider_id = parts[2]
-    action = parts[3]
-    await callback.answer("Cancelled." if (provider_id, action) == ("action", "cancel") else None)
+    workflow, provider, action = WorkflowId(parts[1]), parts[2], parts[3]
     message = callback.message
-    if not isinstance(message, Message):
-        return
-
-    if (provider_id, action) == ("action", "cancel"):
+    if provider == "action" and action in {"another", "language", "search", "cancel"}:
         try:
-            await services.deliver_subtitle.current_page(callback.from_user.id, workflow_id)
-        except ApplicationError as error:
-            await message.answer(present_error(error))
-            return
-        await remove_inline_keyboard(message)
-        await services.cancel_workflow.execute(callback.from_user.id)
+            page = await services.deliver_subtitle.current_page(
+                callback.from_user.id, workflow, rotate=True
+            )
+            await answer_callback(callback)
+            if action == "another":
+                await send_subtitle_page(
+                    message, page, title="this title", language=page.language, edit=True
+                )
+            elif action == "language":
+                await show_language_picker(message, str(page.workflow_id), edit=True)
+            else:
+                result = await services.start_search.execute(
+                    callback.from_user.id, page.workflow_id
+                )
+                assert result.workflow_id is not None
+                await render_panel(
+                    message,
+                    ui("title"),
+                    InlineKeyboardMarkup(inline_keyboard=flow_controls(result.workflow_id)),
+                    edit=True,
+                )
+        except ApplicationError:
+            await answer_callback(callback, ui("stale"))
         return
-    if provider_id == "action" and action in {"language", "search", "another"}:
+    if (provider, action) == ("page", "more"):
         try:
-            page = await services.deliver_subtitle.current_page(callback.from_user.id, workflow_id)
-        except ApplicationError as error:
-            await message.answer(present_error(error))
-            return
-        await remove_inline_keyboard(message)
-        if action == "language":
-            await show_language_picker(message, str(workflow_id))
-        elif action == "search":
-            await services.start_search.execute(callback.from_user.id)
-            await message.answer(TITLE_PROMPT)
-        else:
-            await send_subtitle_page(message, page, title="this title", language=page.language)
+            page = await services.find_subtitles.next_page(callback.from_user.id, workflow)
+            await answer_callback(callback)
+            await send_subtitle_page(
+                message, page, title="this title", language=page.language, edit=True
+            )
+        except ApplicationError:
+            await answer_callback(callback, ui("stale"))
         return
-    if (provider_id, action) == ("page", "more"):
-        try:
-            page = await services.find_subtitles.next_page(callback.from_user.id, workflow_id)
-        except ApplicationError as error:
-            await message.answer(present_error(error))
-            return
-        await remove_inline_keyboard(message)
-        await send_subtitle_page(
-            message,
-            page,
-            title="this title",
-            language=page.language,
-            heading="More subtitle results:",
-        )
+    if not action.isdigit() or provider in {"page", "action"}:
+        await answer_callback(callback, ui("stale"))
         return
-    if not action.isdigit() or provider_id in {"page", "action"}:
-        await message.answer("That subtitle selection is invalid.")
-        return
-    await remove_inline_keyboard(message)
     try:
-        outcome = await services.deliver_subtitle.execute(
+        attempt = await services.deliver_subtitle.claim(
             callback.from_user.id,
-            workflow_id,
-            ProviderId(provider_id),
+            workflow,
+            ProviderId(provider),
             int(action),
+            confirm_resend=parts[0] == "resend",
         )
     except ApplicationError as error:
-        markup = None
+        await download_error(callback, services, message, workflow, provider, action, error)
+        return
+    workflow = attempt.workflow_id
+    await answer_callback(callback)
+    try:
         try:
-            await services.deliver_subtitle.current_page(callback.from_user.id, workflow_id)
-            markup = InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [InlineKeyboardButton(text="Retry", callback_data=callback.data)],
-                    [
-                        InlineKeyboardButton(
-                            text="Search another title",
-                            callback_data=f"subtitle:{workflow_id}:action:search",
-                        )
-                    ],
-                ]
+            panel = await render_panel(message, ui("processing"), edit=True)
+            if isinstance(panel, Message):
+                message = panel
+        except TelegramAPIError:
+            pass  # UI status failure must not discard a valid claimed download.
+        outcome = await services.deliver_subtitle.download(attempt)
+    except ApplicationError as error:
+        await download_error(callback, services, message, workflow, provider, action, error)
+        return
+    except BaseException:
+        await services.deliver_subtitle.restore(callback.from_user.id, workflow)
+        raise
+    subtitle = outcome.subtitle
+    uploader = f"\n{ui('uploader')}: {subtitle.uploader}" if subtitle.uploader else ""
+    try:
+        await message.answer_document(
+            BufferedInputFile(subtitle.content, filename=subtitle.filename),
+            caption=safe_caption(f"{subtitle.attribution}{uploader}"),
+        )
+    except (TelegramAPIError, TimeoutError) as error:
+        uncertain = isinstance(error, (TelegramNetworkError, TelegramServerError, TimeoutError))
+        await services.deliver_subtitle.restore(
+            callback.from_user.id,
+            workflow,
+            uncertain=(ProviderId(provider), int(action)) if uncertain else None,
+        )
+        try:
+            page = await services.deliver_subtitle.recovery_page(callback.from_user.id, workflow)
+            await render_panel(
+                message,
+                ui("upload") if uncertain else ui("upload_failed"),
+                recovery_keyboard(page, f"subtitle:{page.workflow_id}:{provider}:{action}"),
+                edit=True,
             )
         except ApplicationError:
             pass
-        await message.answer(present_error(error), reply_markup=markup)
         return
-
-    subtitle = outcome.subtitle
-    uploader = f"\nUploader: {subtitle.uploader}" if subtitle.uploader else ""
-    document = BufferedInputFile(subtitle.content, filename=subtitle.filename)
-    try:
-        await message.answer_document(
-            document,
-            caption=safe_caption(f"{subtitle.attribution}{uploader}"),
+    except BaseException:
+        await services.deliver_subtitle.restore(
+            callback.from_user.id, workflow, uncertain=(ProviderId(provider), int(action))
         )
-    except TelegramAPIError:
-        await services.deliver_subtitle.restore(callback.from_user.id, workflow_id)
-        await message.answer(
-            "Telegram could not confirm file delivery. Check the chat before retrying.",
-            reply_markup=InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [InlineKeyboardButton(text="Retry", callback_data=callback.data)],
-                    [
-                        InlineKeyboardButton(
-                            text="Search another title",
-                            callback_data=f"subtitle:{workflow_id}:action:search",
-                        )
-                    ],
-                ]
-            ),
-        )
-        return
-    next_id = await services.deliver_subtitle.finish(callback.from_user.id, workflow_id)
-    await message.answer(
-        "Subtitle sent. What next?",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text="Another subtitle", callback_data=f"subtitle:{next_id}:action:another"
-                    )
-                ],
-                [
-                    InlineKeyboardButton(
-                        text="Search another title",
-                        callback_data=f"subtitle:{next_id}:action:search",
-                    )
-                ],
-            ]
-        ),
-    )
+        raise
+    next_id = await services.deliver_subtitle.finish(callback.from_user.id, workflow)
     monitoring.increment("deliveries", "telegram")
-    logger.info("subtitle_delivered", user_ref=user_reference(callback.from_user.id))
+    logger.info("subtitle_delivered")
+    try:
+        page = await services.deliver_subtitle.current_page(callback.from_user.id, next_id)
+        await render_panel(message, ui("sent"), recovery_keyboard(page, success=True), edit=True)
+    except ApplicationError:
+        pass  # A newer explicit search has already replaced this workflow.
 
 
 __all__ = ["subtitle_keyboard", "subtitle_label", "subtitle_selected"]

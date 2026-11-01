@@ -1,294 +1,118 @@
+<img src="assets/brand/submate-avatar-v2.jpg" alt="SubMate icon" width="96" align="right" />
+
 # SubMate
 
-[![Quality](https://github.com/shakibasaee/submate-bot/actions/workflows/quality.yml/badge.svg)](https://github.com/shakibasaee/submate-bot/actions/workflows/quality.yml)
+**Movie and TV subtitles, delivered in Telegram.**
 
-SubMate is a Telegram bot that finds movie and TV subtitles and delivers them
-directly in chat. It uses TMDb to identify the exact title or episode, searches
-SubDL or OpenSubtitles for English or Persian subtitles, and sends the selected result as
-a validated SRT document.
+Find a title, choose a subtitle language, and receive a validated SRT file.
+For series, select the season and episode before choosing a subtitle version.
+SubMate supports English and Persian interfaces, remembers language preferences,
+and provides recovery actions when a download fails.
 
-The application is a typed, asynchronous Python service with explicit domain,
-application, Telegram, and infrastructure boundaries. It can run as a lightweight
-single process for local use or with PostgreSQL and Redis for a more durable
-deployment.
+[![Quality on main](https://github.com/shakibasaee/submate-bot/actions/workflows/quality.yml/badge.svg?branch=main)](https://github.com/shakibasaee/submate-bot/actions/workflows/quality.yml)
 
-## Demo and verified status
+[Open @Sub_Mate_bot](https://t.me/Sub_Mate_bot) ·
+[Setup](#quick-start) · [Troubleshooting](#troubleshooting) ·
+[Verification](#verification) · [Architecture](#architecture)
 
-Movie: /start -> interface language on first use -> Subtitle search -> subtitle language -> Inception (2010) -> subtitle -> SRT.
-TV: search Breaking Bad -> Season 1 -> Episode 1 -> subtitle -> S01E01 SRT.
-After delivery, use Another subtitle or Search another title. On failure, use Retry.
+> The bot needs a running host and access to Telegram, TMDb, and its subtitle
+> provider. Opening its profile does not start a conversation; press **Start** or
+> send `/start`. A local installation stops when its computer is off or asleep.
 
-```mermaid
-flowchart LR
-    Telegram --> Application
-    Application --> Ports
-    TMDb --> Ports
-    SubDL --> Ports
-    OpenSubtitles --> Ports
-    Preferences[SQLite or PostgreSQL preferences] --> Ports
-    Redis[Optional cache and limits] --> Ports
-```
+## What you can do
 
-For a reproducible demonstration, configure the ignored .env, run
-`python -m scripts.live_check`, then start one `python -m app.main` process.
-Complete both flows above, open each file, and demonstrate a second search without
-/start. A passing automated suite does not prove live delivery. See
-[Integration evidence](INTEGRATION_CHECKLIST.md) for observed results.
-If /start receives no reply, first verify polling is running and Telegram is reachable.
-The local bot stops when its process or computer stops.
+- Search movies and series using TMDb titles and release years.
+- Navigate titles, seasons, episodes, and subtitle versions with inline buttons,
+  Back controls, and pagination.
+- Choose **English** or **فارسی** for the interface independently of subtitle language.
+- Review available release names, language, format, hearing-impaired and forced
+  flags, and provider-supplied ratings or download counts. Missing metadata is omitted.
+- Receive SRT documents with movie-year or `SxxExx` identifiers in their filenames.
+- Retry temporary failures, choose another version, change language, or start a
+  new search without repeating `/start`.
 
-### When the bot is offline
+The persistent menu contains **Subtitle search**, **Subtitle language**,
+**Settings**, and **Help**. First use offers an interface-language picker, followed
+by a personalized welcome. Later `/start` messages use the saved interface language.
 
-On Windows, double-click **Start SubMate.cmd** in this repository. It uses the
-existing virtual environment, starts the bot in the background, and refuses to
-launch a second local poller for the same token. Closing the launcher window is
-safe; keep the computer awake and online. Runtime logs remain in the ignored
-`logs/submate-local.log` file. Check local status with:
+## Verification status
 
-```powershell
-.venv\Scripts\python.exe -m scripts.local_bot status
-```
+This README describes the implementation on **`codex/tmdb-setup-docs`**. It has not
+been merged into `main`; the badge above reports the workflow on `main`.
+The following are recorded observations, not a live uptime indicator.
 
-If the process is running but Telegram stays silent, run
-`python -m scripts.live_check` in the activated environment. Local health only
-establishes that the process responds; it does not establish internet access.
-Check the computer's network/VPN connection to Telegram, TMDb and the provider.
-A browser-only proxy does not route the Python bot's traffic.
-At startup, temporary Telegram connection failures are retried in batches of three
-requests with a 20-second request timeout, followed by a 15-second pause before the
-next batch. The local process stays alive while waiting for access to return.
-Authentication rejection is not retried. Once polling begins, the Telegram polling
-loop reconnects with bounded backoff after temporary network failures.
-
-On 2026-10-29, the latest live check encountered network failures connecting to
-Telegram and TMDb. This is separate from the successful provider observations below;
-no fresh movie/episode download or Telegram receipt was established by that run.
-
-When this computer is off or asleep, the bot cannot answer. Availability independent
-of this computer requires a separately authorized deployment on an always-on host,
-with automatic process restart and persistent preference storage. Pushing code to
-GitHub does not deploy or run it. Keep only one poller for this bot across hosts.
-
-On 2026-10-28, live Telegram authentication and TMDb search passed. SubDL accepted
-the configured key, and real Inception (2010) and Breaking Bad S01E01 subtitles
-were downloaded and validated in memory. Telegram document receipt remains a
-separate manual acceptance check; these provider downloads do not establish it.
-
-## How it works
-
-1. Send /start and choose the interface language on first use. The personalized
-   welcome shows your saved subtitle preference and home menu. Choose Subtitle
-   search and select a subtitle language if needed; the two choices are independent.
-2. Search for a movie or TV series.
-3. Select the matching title. For TV, choose a season and episode.
-4. Review ranked subtitle results and request more when available.
-5. Select a subtitle and receive a validated `.srt` file in Telegram.
-
-SubMate deliberately excludes TV Specials (Season 0). Subtitle files are downloaded
-into memory, validated, and sent without being written to local storage.
-
-## Highlights
-
-- Combined movie and TV search through TMDb
-- Season and episode navigation for television series
-- English and Persian subtitle selection
-- Persistent home menu and paginated title, season, episode, and subtitle choices
-- Ranked provider results with real release metadata
-- Authenticated subtitle downloads with bounded token refresh
-- SRT validation, archive rejection, and a 2 MiB file limit
-- Safe filenames containing season and episode coordinates when relevant
-- PostgreSQL-backed language preferences
-- Redis-backed caching and rate limiting
-- In-memory fallbacks for local development and degraded operation
-- Structured JSON logs with credential redaction
-- Liveness, readiness, and Prometheus-compatible metrics endpoints
-- Docker Compose and Railway deployment configuration
-
-## Current status
-
-The installable baseline passes dependency validation, linting, formatting, static
-type checking, and 211 automated tests on Python 3.13. The test suite covers movie
-and episode workflows, provider authentication and errors, application lifecycle,
-configuration, logging safety, and deployment configuration.
-
-Automated provider tests use controlled test doubles. A green test run does not by
-itself prove that live TMDb, OpenSubtitles, Telegram, PostgreSQL, or Redis services
-are reachable from a particular deployment. Use the production smoke check and the
-manual movie and episode checks described below before treating a deployment as
-verified.
-
-Failed downloads preserve the selected title, language, and subtitle choices.
-Retry requests a fresh download after a temporary provider failure; Search another
-title starts a new search. An uncertain Telegram upload first asks whether the file
-arrived. Only **Not received — send again** authorizes another upload; **I received
-the file** returns to the next actions without resending.
-After delivery, Another subtitle returns to the choices. Change language opens
-the language picker directly and refreshes subtitles for the selected movie or episode.
-
-### Back navigation and rejected files
-
-- Download and Telegram upload failures offer Back to subtitle list, Change
-  language, and Search another title. Returning to the list uses the retained
-  title, language, episode, and candidate list without another provider search.
-- TV subtitle lists also offer Choose another episode; episode lists offer
-  Back to seasons. Language and title controls remain available, including when
-  there are no usable subtitles or episodes.
-- Retry is available for temporary download/delivery failures. Files rejected as
-  corrupt, unsafe, or invalid SRT are removed and cannot be retried. Their provider
-  file identities are excluded from subsequent results throughout the same flow,
-  including after language changes or returning to the same episode.
-- Back navigation, replacement lists, recovery controls, and language pickers use
-  new workflow identifiers. Repeated or stale buttons cannot select a shifted
-  candidate index, interrupt a delivery, or submit the same delivery twice.
-- Interface and subtitle languages are independent English/Persian preferences.
-  Rejected-file exclusions are temporary conversation state, cleared on a new title
-  search, expiry, or process restart; they are not a permanent provider blacklist.
-
-Focused navigation and recovery checks are in
-[`tests/test_back_navigation.py`](tests/test_back_navigation.py).
-
-### Telegram interface
-
-The persistent home keyboard has exactly four actions (shown here in Persian;
-English labels appear when English is chosen for the interface):
-
-| | |
+| Area | Last recorded evidence |
 | --- | --- |
-| 🔎 جست‌وجوی زیرنویس | 🌐 زبان زیرنویس |
-| ⚙️ تنظیمات | ❓ راهنما |
+| Automated checks | **211 tests passed**, plus dependency, lint, formatting, and type checks on Python 3.13; recorded 2026-10-29. |
+| Live provider downloads | Inception (2010) and Breaking Bad S01E01 SRTs downloaded from SubDL and validated in memory on 2026-10-28. |
+| Later connectivity check | Telegram and TMDb connection attempts failed on 2026-10-29. This did not establish invalid credentials. |
+| Telegram document receipt | Not verified. Provider downloads and mocked uploads do not prove receipt in Telegram. |
+| PostgreSQL, Redis, and deployment | Automated coverage/configuration checks exist; live operation in a deployed environment remains unverified. |
 
-Title results show the actual movie/TV indicator, title, and year. Seasons and
-episodes show their number and short metadata name in two columns. Lists display
-up to eight titles, seasons, or episodes per page, and five subtitle versions per
-page. Previous/next controls and an actual page count cover the retrieved results;
-there is no silent 50-item cutoff. The selected list page is retained when going back.
-
-Subtitle version buttons use the release name and available provider metadata:
-format, HI, forced-subtitle flag, download count, and rating. Missing statistics
-are omitted. The interface does not invent popularity scores or recommendations.
-
-After delivery, actions are **📄 نسخهٔ دیگر | 🌐 تغییر زبان**, with
-**📺 انتخاب قسمت دیگر** for TV, followed by **🔎 جست‌وجوی جدید**. Temporary errors
-offer Retry; rejected files offer another version when one remains. Empty lists
-retain meaningful language, episode/title, and new-search controls.
-
-Inline selections, processing, results, and recoverable errors update the same
-bot message when Telegram permits editing. The SRT itself arrives as a separate
-document. Stale clicks show a brief notice without overwriting the current panel.
-Download claims block duplicate clicks before showing the processing state.
-
-Use `/search`, `/language`, `/help`, and `/about` as typed equivalents. Selecting
-English subtitles does not change the selected interface or home keyboard. If a
-Telegram client hides the persistent keyboard, open it with the keyboard icon.
-UI contracts are covered in [`tests/test_button_interface.py`](tests/test_button_interface.py).
-
-### Personalized welcome and interface settings
-
-First /start offers **فارسی 🇮🇷** and **English 🇬🇧** for the interface. Choosing
-one saves only that preference and sends a welcome using the human sender's
-current Telegram first name. Names are bounded, stripped of unsafe control
-characters, HTML-escaped, and never stored or logged by the welcome feature.
-An unusable name produces a generic greeting. Later /start messages use the
-saved interface language and the current Telegram name.
-
-Use **Settings** or `/settings` to change the interface language. `/about` still
-shows the project introduction.
-This keeps the active movie/episode selection, subtitle choices, and subtitle
-language. `/language` and the Subtitle language home action change only the
-subtitle preference. Concurrent updates use isolated per-user interface locales.
-
-The welcome is triggered by pressing Start or sending /start, then continued by
-the interface-selection callback. Simply viewing the profile does not create a
-new welcome message. A short bilingual profile introduction is prepared in
-[`docs/bot-profile.md`](docs/bot-profile.md); it has not been published by this change.
+See [the integration checklist](INTEGRATION_CHECKLIST.md) for dated observations
+and acceptance criteria. No permanent availability is claimed.
 
 ## Quick start
 
-### Requirements
+### 1. Install
 
-- Python 3.12 or newer
-- A Telegram bot token from [@BotFather](https://t.me/BotFather)
-- A TMDb API key from [TMDb API settings](https://www.themoviedb.org/settings/api)
-- A SubDL personal API key, or an OpenSubtitles API key, username, and password
-- Network access to Telegram, TMDb, and the selected subtitle provider
+You need Python **3.12+** (the recorded checks used 3.13), a Telegram bot token,
+a TMDb **v3 API key**, and credentials for one subtitle provider.
+PostgreSQL and Redis are optional for local use.
 
-PostgreSQL and Redis are optional when running locally. Set
-`PREFERENCE_SQLITE_PATH=data/preferences.sqlite3` to remember languages after restart.
-
-### Install
-
-Clone the repository and enter it:
+Clone the branch described by this README:
 
 ```bash
-git clone https://github.com/shakibasaee/submate-bot.git
+git clone --branch codex/tmdb-setup-docs https://github.com/shakibasaee/submate-bot.git
 cd submate-bot
 ```
 
-Create a virtual environment.
-
-**Windows PowerShell**
+**Windows PowerShell** — activation is not required:
 
 ```powershell
 py -3.13 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-Copy-Item .env.example .env
+.\.venv\Scripts\python.exe -m pip install -r requirements.lock
+.\.venv\Scripts\python.exe -m pip install --no-deps -e .
+if (-not (Test-Path -LiteralPath .env)) { Copy-Item .env.example .env }
 ```
 
-**Linux or macOS**
+**Linux or macOS:**
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-cp .env.example .env
-```
-
-Install the reviewed dependency set used by CI:
-
-```bash
-python -m pip install --upgrade pip
 python -m pip install -r requirements.lock
 python -m pip install --no-deps -e .
+test -f .env || cp .env.example .env
 ```
 
-For development without the lock file, the package can instead resolve the
-declared version ranges:
+Keep an existing `.env`; copying the template must not replace your credentials.
+The lock file includes the development tools used by CI.
 
-```bash
-python -m pip install -e ".[dev]"
-```
+### 2. Configure
 
-### Configure
-
-#### Obtain a TMDb API key
-
-SubMate uses TMDb's v3 application authentication. To obtain the correct key:
-
-1. Create or sign in to your [TMDb account](https://www.themoviedb.org/login) from
-   a desktop browser.
-2. Open **Account settings**, select **API**, and request a developer API key.
-3. Accept the TMDb API terms and describe the SubMate application when prompted.
-4. Copy the value labelled **API Key (v3 auth)**. SubMate sends this value as the
-   `api_key` query parameter; do not substitute the longer API Read Access Token.
-5. Store the key only in the ignored local `.env` file or your deployment platform's
-   secret store.
-
-TMDb documents the registration process in its official
-[Getting Started guide](https://developer.themoviedb.org/docs/getting-started) and
-[authentication guide](https://developer.themoviedb.org/docs/authentication-application).
-Non-commercial API use is subject to TMDb's terms and attribution requirements.
-
-#### Add the credentials
-
-Open `.env` and replace the credential placeholders:
+Edit the ignored local `.env`. For a local setup using SubDL:
 
 ```dotenv
 TELEGRAM_BOT_TOKEN=replace-with-your-bot-token
-TMDB_API_KEY=replace-with-your-tmdb-api-key
+TMDB_API_KEY=replace-with-your-tmdb-v3-api-key
 SUBDL_API_KEY=replace-with-your-subdl-api-key
 DEMO_MODE=false
+PREFERENCE_SQLITE_PATH=data/preferences.sqlite3
+HEALTH_HOST=127.0.0.1
+HEALTH_PORT=8080
 ```
 
-Alternatively, leave `SUBDL_API_KEY` unset and configure OpenSubtitles:
+Obtain the bot token from [@BotFather](https://t.me/BotFather), the TMDb key from
+[TMDb API settings](https://www.themoviedb.org/settings/api), and a SubDL key from
+[your SubDL API panel](https://subdl.com/panel/api).
+Use TMDb's **API Key (v3 auth)**, not the longer API Read Access Token.
+
+**Remove or comment out `DATABASE_URL` and `REDIS_URL` from the copied example
+unless you intend to run those services.** The SQLite setting above preserves
+both language preferences across local restarts.
+
+To use OpenSubtitles instead, leave `SUBDL_API_KEY` unset and configure:
 
 ```dotenv
 OPENSUBTITLES_API_KEY=replace-with-your-opensubtitles-api-key
@@ -296,217 +120,208 @@ OPENSUBTITLES_USERNAME=replace-with-your-opensubtitles-username
 OPENSUBTITLES_PASSWORD=replace-with-your-opensubtitles-password
 ```
 
-The example file also contains local PostgreSQL and Redis URLs. Remove or comment
-out `DATABASE_URL` and `REDIS_URL` unless those services are running and reachable.
-For a health endpoint accessible only from the local machine, use:
+Provider selection is explicit: demo mode takes precedence, then a configured
+SubDL key, then OpenSubtitles. SubDL does not require the OpenSubtitles credentials.
+There is no automatic failover between real providers. Account access, available
+subtitles, and download quotas depend on the chosen provider.
 
-```dotenv
-HEALTH_HOST=127.0.0.1
+### 3. Start one instance
+
+On Windows, double-click **[Start SubMate.cmd](Start%20SubMate.cmd)**. It uses the
+existing virtual environment, checks for an existing local instance, and starts
+SubMate in the background. You can close the launcher window afterward.
+
+For foreground operation:
+
+```powershell
+# Windows, from the repository directory
+.\.venv\Scripts\python.exe -m app.main
 ```
 
-Never commit `.env` or any other file containing credentials.
-
-### Run
-
 ```bash
+# Linux/macOS, with the virtual environment activated
 python -m app.main
 ```
 
-Open the bot in Telegram and send `/start`. Only one polling process should use a
-bot token at a time. A local process lock prevents a second instance started
-through `python -m app.main`; it cannot detect another computer polling the bot.
+Use one method at a time. The local token lock prevents duplicate instances on the
+same computer; it cannot detect another host running the same bot.
 
-To verify the live TMDb path, choose a language and search for `Inception`. A result
-showing the movie title and release year confirms that Telegram polling and TMDb
-search are working together. This check does not verify subtitle search or delivery;
-those require the three OpenSubtitles credentials as well.
+### 4. Try the user journey
 
-## Telegram commands
+1. Send `/start` to your configured bot and choose the interface language.
+2. Choose **Subtitle search**, select a subtitle language if needed, and enter a title.
+3. Choose the correct title and year. For TV, choose a season and episode.
+4. Select a subtitle version and open the delivered `.srt` document.
+5. Use **Another subtitle**, **Change language**, **Choose another episode** for TV,
+   or **New search** to continue.
 
-| Command | Purpose |
+## Navigation and recovery
+
+Selections appear below the current message. Where Telegram permits editing,
+processing, results, and errors update that panel rather than adding status messages.
+The SRT arrives as a separate document.
+
+| Situation | Available recovery |
 | --- | --- |
-| `/start` | Choose interface language on first use; otherwise show a personalized welcome and home menu. |
-| `/settings` | Change interface language without changing subtitle language. |
+| Temporary provider failure | Retry, return to retained subtitle choices, change language, or start a new search. |
+| Invalid or unsafe file | The candidate is excluded from the current flow; choose another version or change language, episode, or title. |
+| Uncertain Telegram upload | Check the chat, then choose **I received the file** or explicitly authorize **Not received — send again**. A new search is also available. |
+| Successful delivery | Another subtitle, Change language, another episode for TV, or New search. |
+| Stale or repeated button | A brief notice; the old action cannot replace the current selection or start a duplicate delivery. |
+
+Back navigation retains the relevant title, language, episode, and cached choices.
+Changing subtitle language opens its picker directly. **Settings** changes only the
+interface language and preserves the active subtitle selection.
+
+Rejected candidates remain excluded during the current conversation flow, including
+when returning to the same episode. A new search, expiry, or restart clears that
+exclusion. Uncertain uploads require a receipt decision before another upload of the
+same selection; the bot does not silently resend after a timeout.
+
+### Commands
+
+| Command | Action |
+| --- | --- |
+| `/start` | First-use interface selection, or personalized welcome and main menu. |
 | `/search` | Start a new subtitle search. |
-| `/language` | Choose or change the subtitle language. |
-| `/cancel` | End the current workflow without forgetting the selected language. |
-| `/privacy` | Show the privacy, copyright, and provider notice. |
-| `/help` | List the available commands. |
-| `/about` | Show supported features and provider limitations. |
+| `/language` | Choose or change subtitle language. |
+| `/settings` | Change interface language. |
+| `/cancel` | End the current workflow while retaining language preferences. |
+| `/help` | Usage and commands. |
+| `/about` | Project introduction and supported features. |
+| `/privacy` | Data use, provider attribution, and copyright notice. |
 
-## Configuration
+## Troubleshooting
 
-Settings are defined in [`app/core/config.py`](app/core/config.py). SubMate reads
-`.env` from the working directory, and process environment variables take
-precedence. Setting names are case-insensitive and unknown settings are ignored.
+| Symptom | What to check |
+| --- | --- |
+| `/start` receives no reply | Confirm the process is running, then check network access to Telegram. Opening a bot profile alone does not send `/start`. |
+| Local process is running but the bot is silent | Check the computer's network/VPN access to Telegram and TMDb. A browser-only proxy does not route the Python process. Run the live check below. |
+| Subtitle search is not configured | Enter `SUBDL_API_KEY`, or all three OpenSubtitles settings, in the local `.env`; restart to load configuration changes. |
+| Authentication is rejected | Verify the relevant provider credentials locally. Network timeouts alone are not evidence of an invalid key. |
+| Download quota is exhausted | Wait for the provider's allowance to reset; repeated retries do not restore quota. |
+| Port is already in use | Set `HEALTH_PORT` to an unused local port. Do not stop unrelated services. |
+| Language preferences disappear after restart | Configure `PREFERENCE_SQLITE_PATH` or PostgreSQL; memory-only preferences do not survive restart. |
+| Polling conflict | Ensure only one host/process uses the token. A local lock cannot prevent a remote instance. |
 
-### Credentials and services
-
-| Variable | Required | Purpose |
-| --- | --- | --- |
-| `TELEGRAM_BOT_TOKEN` | Yes | BotFather token used for Telegram polling. |
-| `TMDB_API_KEY` | For search | Enables movie and TV metadata lookup. |
-| `SUBDL_API_KEY` | With SubDL | Enables SubDL search; takes precedence over OpenSubtitles. |
-| `OPENSUBTITLES_API_KEY` | With OpenSubtitles | Alternative subtitle provider API key. |
-| `OPENSUBTITLES_USERNAME` | With OpenSubtitles | Authenticates OpenSubtitles downloads. |
-| `OPENSUBTITLES_PASSWORD` | With OpenSubtitles | Authenticates OpenSubtitles downloads. |
-| `DATABASE_URL` | No | PostgreSQL connection used for language preferences. |
-| `PREFERENCE_SQLITE_PATH` | No | Local durable language storage when PostgreSQL is omitted. |
-| `REDIS_URL` | No | Redis connection used for caches and rate limits. |
-
-Only the Telegram token is required while loading configuration. Live-mode readiness
-requires TMDb plus either a SubDL key or the three OpenSubtitles credentials.
-Configuration readiness does not independently establish provider connectivity.
-
-### Runtime settings
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `APP_ENV` | `development` | Environment label included in logs. |
-| `LOG_LEVEL` | `INFO` | Application logging level. |
-| `HEALTH_HOST` | `0.0.0.0` | Health and metrics listener address. |
-| `HEALTH_PORT` | `8080` | Listener port; `PORT` is accepted when this is absent. |
-| `TELEGRAM_TASKS_CONCURRENCY_LIMIT` | `100` | Maximum concurrent Telegram polling tasks. |
-| `TMDB_CACHE_TTL_SECONDS` | `300` | TMDb cache lifetime. |
-| `SUBTITLE_CACHE_TTL_SECONDS` | `120` | Subtitle-search cache lifetime. |
-| `USER_SEARCH_LIMIT_PER_MINUTE` | `10` | Per-user title and subtitle search limit. |
-| `GLOBAL_TMDB_LIMIT_PER_MINUTE` | `120` | Process-wide TMDb search limit. |
-| `GLOBAL_SUBTITLE_LIMIT_PER_MINUTE` | `60` | Process-wide subtitle search limit. |
-| `USER_DOWNLOAD_LIMIT_PER_10_MINUTES` | `5` | Per-user download-attempt limit. |
-| `GLOBAL_DOWNLOAD_LIMIT_PER_MINUTE` | `20` | Process-wide download-attempt limit. |
-
-All numeric settings must be positive. Application limits do not replace limits
-enforced by external providers.
-
-## Storage and fallback behavior
-
-PostgreSQL stores Telegram user IDs, separate subtitle/interface language preferences,
-and update timestamps. Preference tables are created at startup, so the database must exist
-and the configured user must be allowed to create the table.
-
-Redis stores cached TMDb results, cached subtitle results, and rate-limit counters.
-Raw title queries are hashed before being used in cache keys. Local SQLite stores
-only user IDs and separate language preferences; its database belongs in the ignored `data/` directory.
-The additive `interface_preferences` SQLite table and `user_interface_preferences`
-PostgreSQL table leave existing subtitle preference records unchanged. Display
-names are not stored. Memory-only fallbacks do not retain either preference on restart.
-
-When PostgreSQL is omitted, `PREFERENCE_SQLITE_PATH` enables local durable
-preferences. Without it, preferences use memory. Redis omission uses memory for
-caches and rate limits. If a
-configured service fails during startup, the process falls back to memory and must
-be restarted after the service is restored to reconnect. Preference writes made
-during an outage are not replayed automatically.
-
-Active conversations always remain in process memory. They expire lazily after 30
-minutes and do not survive a restart.
-
-## Docker Compose
-
-The included [`compose.yaml`](compose.yaml) runs SubMate with PostgreSQL 17 and
-Redis 8. The databases use persistent named volumes and are not exposed on host
-ports. The bot runs as a non-root user with a read-only root filesystem.
-
-Create and edit the production environment file:
+Check the Windows instance from the repository directory:
 
 ```powershell
-Copy-Item .env.production.example .env.production
+.\.venv\Scripts\python.exe -m scripts.local_bot status
 ```
 
-Then build and start the stack:
+The background launcher writes to ignored `logs/submate-local.log`. At startup,
+Telegram connection failures are retried in batches of three requests, each with a
+20-second timeout, followed by a 15-second pause before the next batch. Invalid
+credentials are not retried. Once polling begins, temporary failures use bounded
+reconnection backoff. This recovers network interruptions while the process stays
+alive; it is not automatic restart after a crash or computer reboot.
 
-```bash
-docker compose --env-file .env.production build --pull
-docker compose --env-file .env.production up -d
-docker compose --env-file .env.production ps
-docker compose --env-file .env.production logs --tail=100 bot
-```
+**When the computer is off or asleep, the local bot is unavailable.** Running
+independently of that computer requires an always-on host and verified deployment.
+Pushing code to GitHub does not run it. Container configuration and deployment
+procedures are in [DEPLOYMENT.md](DEPLOYMENT.md).
 
-Stop the stack while retaining stored data:
+## Verification
 
-```bash
-docker compose --env-file .env.production down
-```
-
-Do not add `--volumes` unless you intend to delete the PostgreSQL and Redis data.
-See [`DEPLOYMENT.md`](DEPLOYMENT.md) for VPS and Railway procedures, backups,
-restoration, upgrades, and rollback.
-
-## Verification and observability
-
-| Endpoint | Meaning |
-| --- | --- |
-| `GET /health/live` | The HTTP listener and process are alive. |
-| `GET /health/ready` | Dependencies are reachable and provider credentials are configured. |
-| `GET /metrics` | Prometheus-compatible counters for process and bot events. |
-
-Keep these endpoints on a private network or behind access controls.
-
-Run the production smoke check from a configured environment:
+Use the virtual environment for all checks. On Windows, replace `python` below
+with `.\.venv\Scripts\python.exe` if the environment is not activated.
 
 ```bash
 python -m scripts.production_smoke
-```
-
-For secret-safe live provider verification, run:
-
-```bash
 python -m scripts.live_check
 ```
 
-This verifies the Telegram target and webhook status, searches TMDb, and, when
-all credentials are configured, downloads one Inception movie SRT and one
-Breaking Bad S01E01 SRT into memory. It consumes provider download quota.
-It never sends Telegram documents or establishes that chat delivery works.
-Errors are reported as status categories; credentials and response bodies are omitted.
-Telegram timeouts and network failures do not prove that credentials are invalid.
+| Check | Establishes | Does not establish |
+| --- | --- | --- |
+| `production_smoke` | Runtime dependency health, required configuration, and Telegram authentication. | Live subtitle search, file download, or Telegram receipt. |
+| `live_check` | Telegram target/webhook status, TMDb search, and configured-provider movie/episode SRT downloads in memory when reachable. | Telegram document receipt or permanent availability. |
+| Manual Telegram acceptance | The selected document arrived, opens correctly, and the conversation remains usable. | Availability after the host stops or across untested deployments. |
 
-The production smoke check constructs the real application runtime, checks attached dependencies,
-verifies provider configuration, and authenticates with Telegram. It does not call
-TMDb or OpenSubtitles and does not send a document.
+The live download check consumes provider quota. Read its reported status categories;
+a completed command is not sufficient evidence that every check passed.
 
-Complete verification requires two manual Telegram workflows:
+For repeatable acceptance:
 
-1. Search for a movie, choose a subtitle, receive it, and open the SRT.
-2. Search for a series, choose a season and episode, receive the subtitle, and
-   confirm the filename contains the expected `SxxExx` and language code.
+- **Welcome:** `/start` shows the chosen interface; changing it leaves subtitle language unchanged.
+- **Movie:** find **Inception (2010)** and receive an SRT that opens correctly.
+- **Episode:** find **Breaking Bad → Season 1 → Episode 1** and receive an SRT with the correct `S01E01` filename.
+- **Recovery:** return to versions or change language without losing the title; temporary failures offer Retry and invalid files offer alternatives.
+- **Continuation:** begin another search without sending `/start` again.
 
-Record results without storing tokens, passwords, temporary provider links, chat
-identifiers, or downloaded copyrighted files in the repository. The current
-evidence is maintained in [`INTEGRATION_CHECKLIST.md`](INTEGRATION_CHECKLIST.md).
+Record observations in [INTEGRATION_CHECKLIST.md](INTEGRATION_CHECKLIST.md), keeping
+provider downloads, Telegram receipt, database behavior, and deployment separate.
+
+### Demo mode
+
+For controlled flow testing, set `DEMO_MODE=true` in the local `.env` and restart.
+Telegram and TMDb still require working configuration/connectivity. Samples are
+labelled **DEMO**, contain original example captions, and are not real movie dialogue.
+Use the fails-once sample to exercise Retry. Production smoke rejects demo mode;
+set `DEMO_MODE=false` and restart before testing real subtitles.
 
 ## Architecture
 
-SubMate follows dependency inversion. Domain and application code define the
-rules and ports; Telegram, TMDb, OpenSubtitles, PostgreSQL, and Redis are adapters.
-[`app/bootstrap.py`](app/bootstrap.py) is the single composition root and owns the
-shared HTTP session and deterministic shutdown.
+SubMate is an asynchronous Python application built with aiogram and aiohttp.
+Application use cases depend on ports; Telegram, metadata, providers, and storage
+implement the surrounding adapters. The composition root owns shared resources
+and shutdown.
 
-```text
-app/
-  main.py                 Process lifecycle and Telegram polling
-  bootstrap.py            Dependency construction and cleanup
-  domain/                 Media, language, subtitle, and error models
-  application/
-    ports/                Provider, metadata, storage, and rate-limit interfaces
-    use_cases/            Search, selection, navigation, delivery, cancellation
-  bot/                    Telegram handlers, keyboards, and presenters
-  infrastructure/         TMDb, OpenSubtitles, PostgreSQL, Redis, memory adapters
-  core/                   Settings, logging, retries, health, and metrics
-scripts/
-  production_smoke.py     Runtime and Telegram authentication check
-  live_check.py           Live provider authentication/search/SRT check
-tests/                    Unit, integration-style, security, and lifecycle tests
+```mermaid
+flowchart LR
+    User[Telegram user] <--> Bot[Handlers and presenters]
+    Bot --> App[Application use cases]
+    App --> Ports[Metadata, provider and storage ports]
+    Ports --> TMDb[TMDb metadata]
+    Ports --> Providers[SubDL or OpenSubtitles]
+    Ports --> Preferences[SQLite or PostgreSQL preferences]
+    Ports --> Cache[Memory or Redis cache and limits]
 ```
 
-Handlers translate Telegram updates and render outcomes; they do not construct
-providers, access databases, choose cache keys, or implement business workflows.
-See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the dependency diagram and enforced
-layer rules.
+| Path | Responsibility |
+| --- | --- |
+| [`app/domain/`](app/domain/) | Media references, language codes, subtitles, and normalized errors. |
+| [`app/application/`](app/application/) | Search, navigation, delivery, recovery, and ports. |
+| [`app/bot/`](app/bot/) | Telegram handlers, localization, keyboards, and presenters. |
+| [`app/infrastructure/`](app/infrastructure/) | Provider, metadata, persistence, cache, and rate-limit adapters. |
+| [`app/bootstrap.py`](app/bootstrap.py) | Dependency construction and shared resource ownership. |
+| [`app/core/`](app/core/) | Configuration, redaction, retries, polling lock, health, and metrics. |
+| [`scripts/`](scripts/) | Local launcher, runtime smoke check, and live verification. |
+| [`tests/`](tests/) | Workflow, provider, navigation, privacy, concurrency, and lifecycle tests. |
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for dependency rules.
+
+### Configuration and persistence
+
+[`.env.example`](.env.example) lists service, cache, rate-limit, and runtime settings;
+[`Settings`](app/core/config.py) defines defaults and validation. Settings load from
+`.env` in the working directory; process environment variables take precedence.
+
+- **Preferences:** PostgreSQL takes precedence when configured. Otherwise,
+  `PREFERENCE_SQLITE_PATH` enables SQLite; without either, preferences use memory.
+- **Conversation state:** process-local memory, expiring lazily after 30 minutes.
+  Active selections do not survive restart; use `/start` to begin again.
+- **Cache and limits:** Redis when available, otherwise process-local memory.
+- **Startup fallback:** unavailable configured PostgreSQL/Redis services fall back
+  to memory. Writes made during a preference-store outage are not replayed; restart
+  after restoring the service to reconnect. Redis does not make multiple replicas safe.
+
+### Health and operation
+
+| Endpoint | Meaning |
+| --- | --- |
+| `GET /health/live` | The local HTTP listener and process respond. |
+| `GET /health/ready` | Runtime dependency health and provider configuration; not live provider authentication or delivery. |
+| `GET /metrics` | Aggregate process and bot counters in Prometheus-compatible format. |
+
+Keep these endpoints private. Local health may respond while startup is waiting
+for Telegram connectivity. [`compose.yaml`](compose.yaml) includes PostgreSQL,
+Redis, persistent database volumes, and a container restart policy; those files
+are deployment configuration, not evidence of a deployed service.
 
 ## Development
 
-Install the development dependencies, then run the same checks used by CI:
+Run the CI-equivalent checks in the virtual environment:
 
 ```bash
 python -m pip check
@@ -516,65 +331,31 @@ python -m pyright
 python -m pytest --cov=app --cov-report=term-missing --cov-report=xml
 ```
 
-The [Quality workflow](.github/workflows/quality.yml) runs these checks for pull
-requests and pushes to `main` and uploads the XML coverage report.
+On Windows, if the system temporary directory is inaccessible, add
+`--basetemp=tmp/pytest` to the test command. The repository ignores this directory.
+The [Quality workflow](.github/workflows/quality.yml) runs on pull requests and
+pushes to `main`. Automated tests use controlled Telegram/provider responses and
+must not be reported as proof of live delivery.
 
-Use a short-lived branch, open a pull request to `main`, and merge only after the
-Quality workflow passes. Tag reviewed releases using semantic versioning.
+## Limitations and privacy
 
-## Current limitations
+- English and Persian are the selectable interface and subtitle languages.
+- TV Specials (Season 0) are excluded. Availability depends on the provider.
+- SRT content must pass structural and safety checks and stay within **2 MiB**.
+  Archives, unsupported content, unsafe control characters/markup, and undecodable
+  files are rejected. Validation does not guarantee timing alignment or translation quality.
+- Subtitles are processed in memory, not saved by the download pipeline. Raw SubDL
+  SRT entries must match the requested language and episode; uncertain identities
+  and unsafe download destinations are rejected.
+- Single-instance polling and conversation state are process-local. There is no
+  cross-restart exactly-once delivery guarantee, synchronization, or automatic
+  provider failover.
+- Preference stores retain Telegram user IDs and separate language choices.
+  Display names are used for the welcome and are not stored. Searches go to TMDb;
+  results may be cached temporarily. There is no search-history table or added analytics.
+- Logs redact recognized credentials, identifiers, and download URLs. Keep `.env`,
+  logs, databases, and downloaded subtitle files out of Git.
 
-- SubMate supports one polling process. Conversation state and per-user locks are
-  process-local, so Redis does not make multiple bot replicas safe.
-- A local bot stops when its process or computer stops. No always-on deployment
-  is implied by local verification.
-- For local durable language preferences, set
-  `PREFERENCE_SQLITE_PATH=data/preferences.sqlite3`. PostgreSQL takes precedence
-  when configured. Without either store, preferences are held in memory.
-- Active conversations are lost on restart; send /start to resume.
-- Telegram upload failures can have an uncertain delivery outcome. Check the chat
-  before retrying to avoid requesting an additional copy.
-- SubDL and OpenSubtitles are alternative providers; this is not automatic
-  provider failover. English and Persian are the only selectable languages.
-- Only validated SRT content up to 2 MiB is accepted. Archive extraction and
-  automatic subtitle synchronization are not supported.
-- The container and deployment tests validate configuration statically. Real
-  credentials, external providers, databases, restart behavior, and Telegram file
-  delivery must still be verified in the target environment.
-
-## Privacy, security, and copyright
-
-Search text is sent to TMDb. Subtitle requests send media identifiers, language,
-and episode coordinates to the selected subtitle provider. PostgreSQL stores language preferences,
-not search history. Logs redact recognized credential fields and patterns.
-
-Keep secrets in ignored environment files or the deployment platform's secret
-store. Never commit credentials, downloaded subtitles, databases, caches, or logs.
-
-Subtitles remain copyrighted by their respective authors. Delivered files include
-provider attribution and uploader attribution when available. Review
-[`SECURITY.md`](SECURITY.md) for dependency maintenance, credential rotation,
-privacy, and operator responsibilities.
-
-## Free personal testing and SubDL
-
-For immediate Telegram flow tests, set `DEMO_MODE=true` in the ignored `.env`,
-then restart the bot and send /start. A Telegram token and TMDb key are still
-required. Every sample is marked DEMO; the original captions are not dialogue
-from the selected movie. Try both the normal sample and the fails-once sample,
-then Retry, Another subtitle, Change language, and Search another title.
-Production smoke deliberately rejects demo mode; readiness includes `mode: demo`.
-
-For real subtitles with SubDL, obtain a free personal API key from
-[SubDL](https://subdl.com/api-doc), set `SUBDL_API_KEY` locally, and set
-`DEMO_MODE=false`. No SubDL password is stored. SubDL takes precedence over
-OpenSubtitles when its key is configured; demo never silently falls back to live.
-Only individual raw SRT files returned by SubDL unpack results are accepted;
-ZIP-only entries and mismatched episode/language results are excluded.
-Account keys embedded in SubDL raw-file URLs are stripped before storing choices
-or downloading. Downloads use the anonymous endpoint; unknown query parameters,
-cross-host redirects, and uncertain episode coordinates are rejected.
-Requests and downloads remain subject to provider limits. Shared-key commercial
-use requires a paid SubDL plan under its current terms. Provider connectivity and
-real Telegram delivery must be separately verified with your own key. The latest
-local provider observations are recorded in [Integration evidence](INTEGRATION_CHECKLIST.md).
+Subtitles belong to their authors. Provider and uploader attribution are included
+when available. Review [SECURITY.md](SECURITY.md) for operator responsibilities and
+[DEPLOYMENT.md](DEPLOYMENT.md) before operating an externally hosted instance.

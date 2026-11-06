@@ -42,7 +42,16 @@ async def show_workflow(
             edit=True,
         )
     else:
-        await send_navigation(message, outcome, edit=True, error=error, retry_data=retry_data)
+        await send_navigation(
+            message,
+            outcome,
+            edit=True,
+            error=error,
+            retry_data=retry_data,
+            season_pack_limit=services.download_season.max_episodes
+            if services.download_season
+            else 0,
+        )
 
 
 async def recover_workflow(

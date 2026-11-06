@@ -12,6 +12,7 @@ from app.application.use_cases import (
     SelectTitle,
     StartSearch,
 )
+from app.application.use_cases.download_season import DownloadSeason
 from app.application.use_cases.interface_preferences import InterfacePreferences
 
 
@@ -26,3 +27,4 @@ class ApplicationServices:
     deliver_subtitle: DeliverSubtitle
     cancel_workflow: CancelWorkflow
     interface_preferences: InterfacePreferences
+    download_season: DownloadSeason | None = None

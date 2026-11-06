@@ -4,6 +4,28 @@ from app.bot.localization import current_interface_language
 from app.domain.languages import InterfaceLanguage, LanguageCode
 
 TEXTS = {
+    "similar_titles": (
+        "No exact results. Did you mean one of these?",
+        "نتیجهٔ دقیقی پیدا نشد. منظورتان یکی از این عنوان‌هاست؟",
+    ),
+    "season_pack": ("Download season ZIP", "دانلود ZIP فصل"),
+    "season_pack_working": (
+        "Checking episode coverage and building the ZIP…",
+        "در حال بررسی قسمت‌ها و ساخت فایل ZIP…",
+    ),
+    "season_pack_ready": (
+        "Season {season} · {count} episode subtitles · {language}\nSource: SubDL",
+        "فصل {season} · زیرنویس {count} قسمت · {language}\nمنبع: SubDL",
+    ),
+    "season_pack_missing": (
+        "No complete SRT pack was found for this season and language. "
+        "Choose an episode below or change language.",
+        "بستهٔ کامل SRT برای این فصل و زبان پیدا نشد. یک قسمت انتخاب کنید یا زبان را تغییر دهید.",
+    ),
+    "season_pack_uncertain": (
+        "Telegram did not confirm the ZIP upload. Check the chat before requesting it again.",
+        "تلگرام ارسال ZIP را تأیید نکرد. پیش از درخواست دوباره، گفتگو را بررسی کنید.",
+    ),
     "home_settings": ("⚙️ Settings", "⚙️ تنظیمات"),
     "uploader": ("Uploader", "بارگذار"),
     "received": ("I received the file", "فایل را دریافت کردم"),
@@ -92,7 +114,10 @@ TEXTS = {
         "This button expired. Use the latest buttons or New search.",
         "این دکمه قدیمی است؛ از دکمه‌های فعلی یا جست‌وجوی جدید استفاده کنید.",
     ),
-    "no_titles": ("No titles found. Try another name.", "عنوانی پیدا نشد؛ نام دیگری را بفرستید."),
+    "no_titles": (
+        "No titles found. Check the spelling or try a shorter part of the title.",
+        "عنوانی پیدا نشد؛ املای نام را بررسی کنید یا بخش کوتاه‌تری از آن را بفرستید.",
+    ),
     "not_set": ("Not set", "هنوز انتخاب نشده"),
     "greeting_named": ("Hi {name} 👋", "سلام {name} 👋"),
     "greeting": ("Hi 👋", "سلام 👋"),

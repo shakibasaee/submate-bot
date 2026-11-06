@@ -1,11 +1,15 @@
 """Title selection and cached, paginated inline navigation."""
 
+from contextlib import suppress
+
 import structlog
 from aiogram import F, Router
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
+from aiogram.exceptions import TelegramAPIError, TelegramNetworkError, TelegramServerError
+from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardMarkup, Message
 
 from app.application.container import ApplicationServices
 from app.application.dto import NavigationOutcome, WorkflowStage
+from app.application.use_cases.download_season import SeasonPackUnavailable
 from app.application.use_cases.navigate_series import NAVIGATION_PAGE_SIZE
 from app.bot.handlers.language import show_language_picker
 from app.bot.keyboards.common import flow_controls
@@ -15,12 +19,12 @@ from app.bot.keyboards.media import (
     results_keyboard,
     seasons_keyboard,
 )
-from app.bot.presentation import answer_callback, render_panel
+from app.bot.presentation import answer_callback, render_panel, safe_caption
 from app.bot.presenters.errors import present_error
 from app.bot.presenters.navigation import send_navigation
 from app.bot.presenters.subtitles import send_subtitle_page
 from app.bot.presenters.workflow import recover_workflow, show_workflow
-from app.bot.texts import ui
+from app.bot.texts import subtitle_language_label, ui
 from app.core.logging import user_reference
 from app.domain.errors import ApplicationError
 from app.domain.models import MediaType, MovieRef, WorkflowId
@@ -57,6 +61,7 @@ async def title_search(message: Message, services: ApplicationServices) -> None:
             stage=WorkflowStage.CHOOSING_TITLE,
             results=outcome.results,
         ),
+        error=ui("similar_titles") if outcome.suggested else None,
     )
 
 
@@ -85,7 +90,7 @@ async def title_selected(callback: CallbackQuery, services: ApplicationServices)
             )
         else:
             nav = await services.navigate_series.current_navigation(callback.from_user.id, workflow)
-            await send_navigation(callback.message, nav, edit=True)
+            await show_workflow(callback.message, services, callback.from_user.id, nav)
     except ApplicationError as error:
         await recover_workflow(callback, services, workflow, error)
 
@@ -101,9 +106,72 @@ async def season_selected(callback: CallbackQuery, services: ApplicationServices
     try:
         await services.navigate_series.select_season(callback.from_user.id, workflow, int(parts[2]))
         nav = await services.navigate_series.current_navigation(callback.from_user.id, workflow)
-        await send_navigation(callback.message, nav, edit=True)
+        await show_workflow(callback.message, services, callback.from_user.id, nav)
     except ApplicationError as error:
         await recover_workflow(callback, services, workflow, error)
+
+
+@router.callback_query(F.data.startswith("pack:"))
+async def season_pack_selected(callback: CallbackQuery, services: ApplicationServices) -> None:
+    service = services.download_season
+    if service is None or not callback.data or not isinstance(callback.message, Message):
+        await answer_callback(callback, ui("stale"))
+        return
+    user_id = callback.from_user.id
+    workflow_id = WorkflowId(callback.data.partition(":")[2])
+    try:
+        state = await service.claim(user_id, workflow_id)
+    except ApplicationError as error:
+        await answer_callback(callback, present_error(error))
+        return
+    message = callback.message
+    error_text = None
+    uncertain = False
+    try:
+        await answer_callback(callback)
+        with suppress(TelegramAPIError):
+            await render_panel(message, ui("season_pack_working"), edit=True)
+        try:
+            content = await service.build(state)
+        except SeasonPackUnavailable:
+            error_text = ui("season_pack_missing")
+        except ApplicationError as error:
+            error_text = present_error(error)
+        else:
+            season = state.episodes[0].season_number
+            try:
+                await message.answer_document(
+                    BufferedInputFile(
+                        content, filename=f"SubMate-S{season:02d}-{state.language}.zip"
+                    ),
+                    caption=safe_caption(
+                        ui("season_pack_ready").format(
+                            season=season,
+                            count=len(state.episodes),
+                            language=subtitle_language_label(state.language),
+                        )
+                    ),
+                )
+            except (TelegramNetworkError, TelegramServerError, TimeoutError):
+                uncertain = True
+                error_text = ui("season_pack_uncertain")
+            except TelegramAPIError:
+                error_text = ui("upload_failed")
+    finally:
+        next_workflow = await service.finish(state)
+    try:
+        nav = await services.navigate_series.current_navigation(
+            user_id, next_workflow, rotate=False
+        )
+    except ApplicationError:
+        return
+    await send_navigation(
+        message,
+        nav,
+        edit=True,
+        error=error_text,
+        season_pack_limit=0 if uncertain else service.max_episodes,
+    )
 
 
 @router.callback_query(F.data.startswith("episode:"))
@@ -209,7 +277,7 @@ async def page_selected(callback: CallbackQuery, services: ApplicationServices) 
             nav = await services.navigate_series.page_at(
                 callback.from_user.id, workflow, stage, page * NAVIGATION_PAGE_SIZE
             )
-            await send_navigation(callback.message, nav, edit=True)
+            await show_workflow(callback.message, services, callback.from_user.id, nav)
         else:
             await answer_callback(callback, ui("stale"))
     except ApplicationError as error:

@@ -15,7 +15,8 @@ from app.domain.errors import (
     UnsafeSubtitleError,
     UnsafeSubtitleLinkError,
 )
-from app.domain.models import EpisodeRef
+from app.domain.languages import LanguageCode
+from app.domain.models import EpisodeRef, SeriesRef
 from app.domain.subtitles import (
     DownloadedSubtitle,
     ProviderFileRef,
@@ -93,75 +94,130 @@ class SubdlProvider:
                 params.update(
                     season_number=str(media.season_number), episode_number=str(media.episode_number)
                 )
-            try:
-                async with self._session.get(
-                    "https://api.subdl.com/api/v1/subtitles", params=params, allow_redirects=False
-                ) as response:
-                    check_status(response.status)
-                    payload = await response.json()
-            except (aiohttp.ClientError, TimeoutError):
-                raise ProviderUnavailableError("SubDL connection failed") from None
-            except ValueError:
-                raise ProviderResponseError("SubDL returned malformed JSON") from None
-            if not isinstance(payload, dict) or payload.get("status") is not True:
-                raise ProviderResponseError("SubDL search failed")
-            matches = payload.get("results", [])
-            if not isinstance(matches, list) or not matches:
+            payload = await self._request_search(params)
+            if not self._matches_title(payload, title_id, params["type"]):
                 return []
-            first = matches[0]
-            if (
-                not isinstance(first, dict)
-                or str(first.get("tmdb_id")) != title_id
-                or first.get("type") != params["type"]
-            ):
-                return []
-            subtitles = payload.get("subtitles", [])
-            if not isinstance(subtitles, list):
-                raise ProviderResponseError("SubDL returned invalid results")
             candidates = []
-            seen = set()
-            for item in subtitles:
+            seen: set[ProviderFileRef] = set()
+            for item in self._subtitle_rows(payload):
                 if not isinstance(item, dict):
                     continue
                 files = item.get("unpack_files", [])
                 if not isinstance(files, list):
                     continue
                 for file in files:
-                    if not isinstance(file, dict) or str(file.get("format", "")).lower() != "srt":
-                        continue
-                    if str(file.get("language", "")).upper() != params["languages"]:
+                    if not isinstance(file, dict):
                         continue
                     if episode and (
                         str(file.get("season")) != str(media.season_number)
                         or str(file.get("episode")) != str(media.episode_number)
                     ):
                         continue
-                    link = file.get("url")
-                    if not isinstance(link, str):
-                        continue
-                    try:
-                        url = download_url(link)
-                    except ProviderLinkError:
-                        continue
-                    if url in seen:
-                        continue
-                    seen.add(url)
-                    candidates.append(
-                        SubtitleCandidate(
-                            self.provider_id,
-                            ProviderFileRef(url),
-                            query.language,
-                            "srt",
-                            str(
-                                file.get("release_name") or item.get("release_name") or "SubDL SRT"
-                            ),
-                            hearing_impaired=bool(file.get("hi")),
-                            attribution="Provided by SubDL",
-                        )
-                    )
+                    candidate = self._raw_candidate(file, item, query.language)
+                    if candidate is not None and candidate.provider_file_ref not in seen:
+                        candidates.append(candidate)
+                        seen.add(candidate.provider_file_ref)
             return candidates
 
         return await retry_async(operation, (ProviderUnavailableError,), attempts=3)
+
+    async def search_season(
+        self, series: SeriesRef, season: int, language: LanguageCode, episodes: frozenset[int]
+    ) -> dict[int, SubtitleCandidate]:
+        params = {
+            "api_key": self._api_key,
+            "tmdb_id": series.external_id,
+            "type": "tv",
+            "season_number": str(season),
+            "languages": str(language).upper(),
+            "full_season": "1",
+            "unpack": "1",
+            "subs_per_page": "30",
+        }
+
+        async def operation() -> dict[int, SubtitleCandidate]:
+            payload = await self._request_search(params)
+            if not self._matches_title(payload, series.external_id, "tv"):
+                return {}
+            for pack in self._subtitle_rows(payload):
+                if not isinstance(pack, dict) or pack.get("full_season") is not True:
+                    continue
+                files = pack.get("unpack_files")
+                if not isinstance(files, list):
+                    continue
+                candidates: dict[int, SubtitleCandidate] = {}
+                seen: set[ProviderFileRef] = set()
+                for file in files:
+                    if not isinstance(file, dict) or str(file.get("season")) != str(season):
+                        continue
+                    number = next((n for n in episodes if str(n) == str(file.get("episode"))), None)
+                    if number is None or number in candidates:
+                        continue
+                    candidate = self._raw_candidate(file, pack, language)
+                    if candidate is not None and candidate.provider_file_ref not in seen:
+                        candidates[number] = candidate
+                        seen.add(candidate.provider_file_ref)
+                if candidates.keys() == episodes:
+                    return candidates
+            return {}
+
+        return await retry_async(operation, (ProviderUnavailableError,), attempts=3)
+
+    async def _request_search(self, params: dict[str, str]) -> dict[str, object]:
+        try:
+            async with self._session.get(
+                "https://api.subdl.com/api/v1/subtitles", params=params, allow_redirects=False
+            ) as response:
+                check_status(response.status)
+                payload = await response.json()
+        except (aiohttp.ClientError, TimeoutError):
+            raise ProviderUnavailableError("SubDL connection failed") from None
+        except ValueError:
+            raise ProviderResponseError("SubDL returned malformed JSON") from None
+        if not isinstance(payload, dict) or payload.get("status") is not True:
+            raise ProviderResponseError("SubDL search failed")
+        return payload
+
+    @staticmethod
+    def _matches_title(payload: dict[str, object], title_id: str, media_type: str) -> bool:
+        matches = payload.get("results")
+        return (
+            isinstance(matches, list)
+            and bool(matches)
+            and isinstance(matches[0], dict)
+            and str(matches[0].get("tmdb_id")) == title_id
+            and matches[0].get("type") == media_type
+        )
+
+    @staticmethod
+    def _subtitle_rows(payload: dict[str, object]) -> list[object]:
+        rows = payload.get("subtitles", [])
+        if not isinstance(rows, list):
+            raise ProviderResponseError("SubDL returned invalid results")
+        return rows
+
+    def _raw_candidate(
+        self, file: dict, parent: dict, language: LanguageCode
+    ) -> SubtitleCandidate | None:
+        if (
+            str(file.get("format", "")).lower() != "srt"
+            or str(file.get("language", "")).upper() != str(language).upper()
+            or not isinstance(link := file.get("url"), str)
+        ):
+            return None
+        try:
+            url = download_url(link)
+        except ProviderLinkError:
+            return None
+        return SubtitleCandidate(
+            self.provider_id,
+            ProviderFileRef(url),
+            language,
+            "srt",
+            str(file.get("release_name") or parent.get("release_name") or "SubDL SRT"),
+            hearing_impaired=bool(file.get("hi")),
+            attribution="Provided by SubDL",
+        )
 
     async def download(self, candidate: SubtitleCandidate) -> DownloadedSubtitle:
         if candidate.provider_id != self.provider_id:

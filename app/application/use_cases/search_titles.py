@@ -1,11 +1,19 @@
 """Validated metadata title search."""
 
+import re
+from difflib import SequenceMatcher
+
 from app.application.dto import SearchTitlesOutcome, WorkflowStage
 from app.application.ports.conversations import ConversationRepository
 from app.application.ports.locks import UserLockManager
 from app.application.ports.metadata import MetadataGateway
 from app.application.ports.rate_limits import RateLimiter
-from app.domain.errors import InvalidInputError, InvalidTransitionError, RateLimitedError
+from app.domain.errors import (
+    InvalidInputError,
+    InvalidTransitionError,
+    MetadataError,
+    RateLimitedError,
+)
 
 
 class SearchTitles:
@@ -49,6 +57,34 @@ class SearchTitles:
                     "Title search is busy right now.", global_decision.retry_after
                 )
             results = tuple(await self._metadata.search(normalized))
+            suggested = False
+            if not results:
+                prefix = _fallback_prefix(normalized)
+                if (
+                    prefix
+                    and (
+                        await self._rate_limiter.check("global-tmdb", "all", self._global_limit, 60)
+                    ).allowed
+                ):
+                    try:
+                        alternatives = await self._metadata.search(prefix)
+                    except MetadataError:
+                        alternatives = []
+                    scores = [
+                        (
+                            SequenceMatcher(
+                                None, _title_key(normalized), _title_key(item.title)
+                            ).ratio(),
+                            item,
+                        )
+                        for item in alternatives
+                    ]
+                    results = tuple(
+                        item
+                        for score, item in sorted(scores, key=lambda pair: pair[0], reverse=True)
+                        if score >= 0.84
+                    )
+                    suggested = bool(results)
             # A new text search deliberately replaces prior selections and buttons.
             # Do this only after metadata succeeds, preserving choices on network failure.
             current = await self._conversations.reset_workflow(user_id)
@@ -59,4 +95,22 @@ class SearchTitles:
                     search_results=results,
                 )
             )
-            return SearchTitlesOutcome(current.workflow_id, results, conversation.language)
+            return SearchTitlesOutcome(
+                current.workflow_id, results, conversation.language, suggested
+            )
+
+
+def _title_key(title: str) -> str:
+    return " ".join(re.findall(r"\w+", title.casefold()))
+
+
+def _fallback_prefix(title: str) -> str:
+    words = _title_key(title).split()
+    if not words:
+        return ""
+    index = max(range(len(words)), key=lambda i: len(words[i]))
+    word = words[index]
+    if len(word) < 6:
+        return ""
+    # Ask the metadata provider once for a prefix, then rank only actual titles.
+    return " ".join([*words[:index], word[: max(4, len(word) // 2 + 1)]])

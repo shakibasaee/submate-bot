@@ -78,6 +78,7 @@ class SearchTitlesOutcome:
     workflow_id: WorkflowId
     results: tuple[MediaSearchResult, ...]
     language: LanguageCode = LanguageCode.ENGLISH
+    suggested: bool = False
 
 
 @dataclass(frozen=True, slots=True)

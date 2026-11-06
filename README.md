@@ -22,6 +22,8 @@ and provides recovery actions when a download fails.
 ## What you can do
 
 - Search movies and series using TMDb titles and release years.
+- Get close-match suggestions on some misspellings. When the first search returns
+  nothing, SubMate tries one shorter prefix and shows only similar TMDb titles.
 - Navigate titles, seasons, episodes, and subtitle versions with inline buttons,
   Back controls, and pagination.
 - Choose **English** or **فارسی** for the interface independently of subtitle language.
@@ -43,9 +45,10 @@ The following are recorded observations, not a live uptime indicator.
 
 | Area | Last recorded evidence |
 | --- | --- |
-| Automated checks | **211 tests passed**, plus dependency, lint, formatting, and type checks on Python 3.13; recorded 2026-10-29. |
+| Automated checks | **218 tests passed**, plus dependency, lint, formatting, and type checks on Python 3.13; recorded 2026-11-05. |
 | Live provider downloads | Inception (2010) and Breaking Bad S01E01 SRTs downloaded from SubDL and validated in memory on 2026-10-28. |
 | Later connectivity check | Telegram and TMDb connection attempts failed on 2026-10-29. This did not establish invalid credentials. |
+| Title suggestions and season ZIP | Automated tests cover close matches, complete and incomplete packs, repeated clicks, and ambiguous uploads. The 2026-11-05 live attempt could not reach Telegram or complete TMDb verification; no live ZIP delivery was verified. |
 | Telegram document receipt | Not verified. Provider downloads and mocked uploads do not prove receipt in Telegram. |
 | PostgreSQL, Redis, and deployment | Automated coverage/configuration checks exist; live operation in a deployed environment remains unverified. |
 
@@ -154,6 +157,21 @@ same computer; it cannot detect another host running the same bot.
 4. Select a subtitle version and open the delivered `.srt` document.
 5. Use **Another subtitle**, **Change language**, **Choose another episode** for TV,
    or **New search** to continue.
+
+### Download a whole season
+
+With SubDL configured, select a series and season, then choose **Download season
+ZIP** on the episode screen. SubMate requires one provider pack that covers every
+episode listed by TMDb in the selected subtitle language. It downloads and validates
+the individual SRTs, then builds a new ZIP with filenames such as `S01E02-en.srt`.
+It never extracts or forwards the provider's archive.
+
+The option is available for seasons of up to 20 episodes (or the configured
+global download limit, if lower). Each file counts toward the shared download
+limit and provider usage; the bot allows two pack attempts per user per ten
+minutes and caps the combined SRT content at 8 MiB. If coverage is incomplete or a
+download fails, SubMate keeps the episode list available and sends no partial ZIP.
+Whole-series bundles, demo packs, and OpenSubtitles packs are not supported.
 
 ## Navigation and recovery
 
@@ -342,7 +360,7 @@ must not be reported as proof of live delivery.
 - English and Persian are the selectable interface and subtitle languages.
 - TV Specials (Season 0) are excluded. Availability depends on the provider.
 - SRT content must pass structural and safety checks and stay within **2 MiB**.
-  Archives, unsupported content, unsafe control characters/markup, and undecodable
+  Incoming archives, unsupported content, unsafe control characters/markup, and undecodable
   files are rejected. Validation does not guarantee timing alignment or translation quality.
 - Subtitles are processed in memory, not saved by the download pipeline. Raw SubDL
   SRT entries must match the requested language and episode; uncertain identities

@@ -25,6 +25,7 @@ from app.application.use_cases import (
     SelectTitle,
     StartSearch,
 )
+from app.application.use_cases.download_season import DownloadSeason
 from app.application.use_cases.interface_preferences import InterfacePreferences
 from app.core.config import Settings
 from app.domain.errors import ConfigurationError, MetadataError
@@ -230,7 +231,19 @@ async def build_runtime(settings: Settings) -> ApplicationRuntime:
             user_limit=limits.user_search,
             global_limit=settings.global_subtitle_limit_per_minute,
         )
+        active_provider = providers[0]
         services = ApplicationServices(
+            download_season=(
+                DownloadSeason(
+                    conversations,
+                    active_provider,
+                    rate_limiter,
+                    locks,
+                    settings.global_download_limit_per_minute,
+                )
+                if isinstance(active_provider, SubdlProvider)
+                else None
+            ),
             interface_preferences=InterfacePreferences(conversations, preferences, locks),
             start_search=StartSearch(conversations, preferences, locks),
             choose_language=ChooseLanguage(conversations, preferences, locks),

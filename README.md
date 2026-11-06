@@ -45,7 +45,7 @@ The following are recorded observations, not a live uptime indicator.
 
 | Area | Last recorded evidence |
 | --- | --- |
-| Automated checks | **218 tests passed**, plus dependency, lint, formatting, and type checks on Python 3.13; recorded 2026-11-05. |
+| Automated checks | **220 tests passed**, plus dependency, lint, formatting, and type checks on Python 3.13; recorded 2026-11-06. |
 | Live provider downloads | Inception (2010) and Breaking Bad S01E01 SRTs downloaded from SubDL and validated in memory on 2026-10-28. |
 | Later connectivity check | Telegram and TMDb connection attempts failed on 2026-10-29. This did not establish invalid credentials. |
 | Title suggestions and season ZIP | Automated tests cover close matches, complete and incomplete packs, repeated clicks, and ambiguous uploads. The 2026-11-05 live attempt could not reach Telegram or complete TMDb verification; no live ZIP delivery was verified. |
@@ -172,6 +172,9 @@ limit and provider usage; the bot allows two pack attempts per user per ten
 minutes and caps the combined SRT content at 8 MiB. If coverage is incomplete or a
 download fails, SubMate keeps the episode list available and sends no partial ZIP.
 Whole-series bundles, demo packs, and OpenSubtitles packs are not supported.
+
+After the ZIP arrives, use the buttons immediately below it to return to
+episodes or seasons, change subtitle language, or start another search.
 
 ## Navigation and recovery
 

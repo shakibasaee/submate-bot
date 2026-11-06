@@ -9,6 +9,9 @@ TEXTS = {
         "نتیجهٔ دقیقی پیدا نشد. منظورتان یکی از این عنوان‌هاست؟",
     ),
     "season_pack": ("Download season ZIP", "دانلود ZIP فصل"),
+    "season_pack_sent": ("Season ZIP sent.", "فایل ZIP فصل ارسال شد."),
+    "season_pack_next": ("What would you like to do next?", "می‌خواهید بعدش چه کار کنید؟"),
+    "season_pack_back_episodes": ("⬅️ Back to episodes", "⬅️ برگشت به قسمت‌ها"),
     "season_pack_working": (
         "Checking episode coverage and building the ZIP…",
         "در حال بررسی قسمت‌ها و ساخت فایل ZIP…",

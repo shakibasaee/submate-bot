@@ -1,5 +1,7 @@
 """Movie, season and episode choices with shared navigation."""
 
+import re
+
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from app.application.use_cases.navigate_series import NAVIGATION_PAGE_SIZE
@@ -35,6 +37,15 @@ def results_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def season_label(item: SeasonSummary) -> str:
+    label = f"{ui('season')} {item.number}"
+    name = " ".join(item.name.split())
+    generic = re.fullmatch(r"(?:season|فصل)\s+(\d{1,10})", name, re.IGNORECASE)
+    if not name or (generic and int(generic[1]) == item.number):
+        return label
+    return safe_button_text(f"{label} · {truncate_text(name, 22)}")
+
+
 def seasons_keyboard(
     seasons: tuple[SeasonSummary, ...] | list[SeasonSummary],
     workflow_id: WorkflowId,
@@ -43,9 +54,7 @@ def seasons_keyboard(
 ) -> InlineKeyboardMarkup:
     buttons = [
         InlineKeyboardButton(
-            text=safe_button_text(
-                f"{ui('season')} {item.number:02d} · {truncate_text(item.name, 22)}"
-            ),
+            text=season_label(item),
             callback_data=f"season:{workflow_id}:{item.number}",
         )
         for item in seasons[offset : offset + NAVIGATION_PAGE_SIZE]

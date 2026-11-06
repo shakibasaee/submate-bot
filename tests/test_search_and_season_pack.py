@@ -11,10 +11,12 @@ from aiogram.methods import SendDocument
 
 from app.application.dto import WorkflowStage
 from app.application.use_cases.download_season import DownloadSeason, SeasonPackUnavailable
-from app.bot.handlers.search import season_pack_selected
+from app.bot.handlers.search import navigation_action, season_pack_selected
+from app.bot.keyboards.media import seasons_keyboard
+from app.bot.localization import interface_locale
 from app.bot.texts import ui
-from app.domain.languages import LanguageCode
-from app.domain.models import EpisodeRef, MediaSearchResult, MediaType, SeriesRef
+from app.domain.languages import InterfaceLanguage, LanguageCode
+from app.domain.models import EpisodeRef, MediaSearchResult, MediaType, SeasonSummary, SeriesRef
 from app.infrastructure.cache.memory import InMemoryRateLimiter
 from app.infrastructure.providers.subdl import SubdlProvider
 from tests.support import FakeMetadata, build_test_application
@@ -137,9 +139,42 @@ def test_pack_delivers_once_and_preserves_episode_navigation(uncertain):
         assert current.episodes == initial.episodes
         assert current.stage is WorkflowStage.CHOOSING_EPISODE
         assert current.workflow_id != initial.workflow_id
-        assert any(b.text == ui("season_pack") for b in buttons(panel)) is not uncertain
+        if uncertain:
+            assert not any(b.text == ui("season_pack") for b in buttons(panel))
+            panel.answer.assert_not_awaited()
+        else:
+            assert panel.edit_text.await_args.args[0] == ui("season_pack_sent")
+            assert panel.edit_text.await_args.kwargs["reply_markup"] is None
+            markup = panel.answer.await_args.kwargs["reply_markup"]
+            actions = {b.text: b.callback_data for row in markup.inline_keyboard for b in row}
+            assert set(actions) == {
+                ui("season_pack_back_episodes"),
+                ui("back_seasons"),
+                ui("language"),
+                ui("search"),
+            }
+            back = actions[ui("season_pack_back_episodes")]
+            await navigation_action(click(back, panel), services)
+            assert any(b.text == ui("season_pack") for b in buttons(panel))
+            assert (await app.conversations.get(1)).episodes == initial.episodes
+            assert len(session.requests) == 3
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("locale", list(InterfaceLanguage))
+def test_generic_season_names_are_shown_once_and_real_names_are_kept(locale):
+    seasons = [
+        SeasonSummary(1, "  Season 01  "),
+        SeasonSummary(2, "فصل ۲"),
+        SeasonSummary(3, "The Final Chapter"),
+    ]
+    with interface_locale(locale):
+        markup = seasons_keyboard(seasons, "fixture")
+        labels = [b.text for row in markup.inline_keyboard[:2] for b in row]
+        season = ui("season")
+    assert labels == [f"{season} 1", f"{season} 2", f"{season} 3 · The Final Chapter"]
+    assert markup.inline_keyboard[0][0].callback_data == "season:fixture:1"
 
 
 def test_incomplete_pack_does_not_download_or_upload_any_files():

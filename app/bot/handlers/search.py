@@ -12,7 +12,7 @@ from app.application.dto import NavigationOutcome, WorkflowStage
 from app.application.use_cases.download_season import SeasonPackUnavailable
 from app.application.use_cases.navigate_series import NAVIGATION_PAGE_SIZE
 from app.bot.handlers.language import show_language_picker
-from app.bot.keyboards.common import flow_controls
+from app.bot.keyboards.common import button, flow_controls
 from app.bot.keyboards.media import (
     episodes_keyboard,
     result_label,
@@ -159,11 +159,21 @@ async def season_pack_selected(callback: CallbackQuery, services: ApplicationSer
                 error_text = ui("upload_failed")
     finally:
         next_workflow = await service.finish(state)
+    if error_text is None:
+        with suppress(TelegramAPIError):
+            await message.edit_text(ui("season_pack_sent"), reply_markup=None)
     try:
         nav = await services.navigate_series.current_navigation(
             user_id, next_workflow, rotate=False
         )
     except ApplicationError:
+        return
+    if error_text is None:
+        rows = flow_controls(nav.workflow_id, "resume", "season_pack_back_episodes")
+        rows.insert(1, [button("back_seasons", f"nav:{nav.workflow_id}:back")])
+        await message.answer(
+            ui("season_pack_next"), reply_markup=InlineKeyboardMarkup(inline_keyboard=rows)
+        )
         return
     await send_navigation(
         message,

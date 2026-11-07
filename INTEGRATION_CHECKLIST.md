@@ -1,5 +1,20 @@
 # SubMate verification evidence
 
+## Multilingual update — 2026-11-07
+
+- 295 tests passed; dependency validation, lint, formatting, and type checks passed.
+- Interfaces: English, Persian, German, Russian. Subtitle choices: en, fa, ar, tr, es, fr, de, it, pt, ru.
+- Both language pickers accept native, English, or Persian names and language codes.
+  Matching does not select automatically.
+- Offline dispatcher verification selects Russian menus, then Turkish subtitles,
+  without a metadata search or a changed interface preference.
+- SQLite migration preserves old preference rows; new preferences survive reopening.
+  PostgreSQL schema support was updated but its migration was not tested live.
+- German/Russian translation keys and format placeholders, Persian input variants,
+  stale callbacks, and language-specific subtitle decoding are tested.
+- These checks do not establish live subtitle availability, Telegram document
+  receipt, or an externally deployed service.
+
 Updated locally on 2026-10-29 in the existing Windows checkout. Automated tests
 use controlled providers and do not establish real Telegram document delivery.
 

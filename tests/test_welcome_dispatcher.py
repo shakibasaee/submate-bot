@@ -14,7 +14,9 @@ import asyncio
 from datetime import datetime, UTC
 from aiogram import Bot, Dispatcher
 from aiogram.client.session.base import BaseSession
-from aiogram.methods import SendMessage, AnswerCallbackQuery, EditMessageReplyMarkup, GetMe
+from aiogram.methods import (
+    SendMessage, EditMessageText, AnswerCallbackQuery, EditMessageReplyMarkup, GetMe,
+)
 from aiogram.types import Message, Chat, User, CallbackQuery, Update, InlineKeyboardMarkup
 from app.bot.router import build_router
 from app.domain.languages import InterfaceLanguage, LanguageCode
@@ -34,7 +36,7 @@ class OfflineSession(BaseSession):
         raise AssertionError("No downloads are expected")
         yield b""
     async def make_request(self, bot, method, timeout=None):
-        if isinstance(method, SendMessage):
+        if isinstance(method, (SendMessage, EditMessageText)):
             self.sent.append(method)
             self.last = Message(message_id=100+len(self.sent), date=datetime.now(UTC),
                 chat=Chat(id=1, type="private"), from_user=robot, text=method.text,
@@ -75,7 +77,26 @@ async def run():
         await incoming(3, "/start")
         assert session.sent[-1].text.startswith("Hi Alice &lt;&amp;&gt; 👋")
         await incoming(4, "🌐 Subtitle language")
-        assert session.sent[-1].text == "Choose your subtitle language:"
+        assert session.sent[-1].text.startswith("Choose your subtitle language")
+        assert not app.metadata.queries
+        await incoming(5, "/settings")
+        await incoming(6, "Русский")
+        choice = session.sent[-1].reply_markup.inline_keyboard[0][0].callback_data
+        assert choice.endswith(":ru")
+        await dispatcher.feed_update(bot, Update(update_id=7, callback_query=CallbackQuery(
+            id="russian-choice", from_user=human, chat_instance="offline",
+            message=session.last, data=choice)), services=app.services)
+        assert session.sent[-1].text.startswith("Привет, Alice &lt;&amp;&gt;")
+        await incoming(8, "🌐 Язык субтитров")
+        await incoming(9, "تركي")
+        choice = session.sent[-1].reply_markup.inline_keyboard[0][0].callback_data
+        assert choice.endswith(":tr")
+        await dispatcher.feed_update(bot, Update(update_id=10, callback_query=CallbackQuery(
+            id="turkish-subtitles", from_user=human, chat_instance="offline",
+            message=session.last, data=choice)), services=app.services)
+        assert await app.preferences.get_interface_language(1) is InterfaceLanguage.RUSSIAN
+        assert await app.preferences.get_language(1) is LanguageCode.TURKISH
+        assert session.sent[-1].text.startswith("Отправьте название")
         assert not app.metadata.queries
         print("offline_dispatcher_passed")
     finally:

@@ -116,7 +116,13 @@ def validate_srt(content: bytes, language: LanguageCode | None = None) -> bytes:
         if content.startswith((b"\xff\xfe", b"\xfe\xff", b"\xef\xbb\xbf")) or language is None:
             raise SubtitleDecodingError("subtitle encoding is invalid or unsupported") from None
         try:
-            text = content.decode("cp1256" if language is LanguageCode.PERSIAN else "cp1252")
+            codec = {
+                LanguageCode.PERSIAN: "cp1256",
+                LanguageCode.ARABIC: "cp1256",
+                LanguageCode.TURKISH: "cp1254",
+                LanguageCode.RUSSIAN: "cp1251",
+            }.get(language, "cp1252")
+            text = content.decode(codec)
         except UnicodeDecodeError:
             raise SubtitleDecodingError("subtitle encoding is invalid or unsupported") from None
     if any(unicodedata.category(char) == "Cc" and char not in "\r\n\t" for char in text):

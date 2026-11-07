@@ -165,7 +165,11 @@ class NavigateSeries:
             }:
                 raise WorkflowExpiredError("These navigation buttons expired.")
             updated = (
-                conversation.evolve(workflow_id=WorkflowId(uuid4().hex), recovery_from=None)
+                conversation.evolve(
+                    workflow_id=WorkflowId(uuid4().hex),
+                    recovery_from=None,
+                    subtitle_picker_open=False,
+                )
                 if rotate
                 else conversation
             )

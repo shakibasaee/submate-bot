@@ -2,7 +2,7 @@
 
 import structlog
 from aiogram import F, Router
-from aiogram.filters import Command
+from aiogram.filters import Command, Filter
 from aiogram.types import CallbackQuery, Message
 
 from app.application.container import ApplicationServices
@@ -16,7 +16,7 @@ from app.bot.presenters.workflow import recover_workflow, show_workflow
 from app.bot.texts import ui
 from app.core.logging import user_reference
 from app.domain.errors import ApplicationError
-from app.domain.languages import LanguageCode
+from app.domain.languages import InterfaceLanguage, LanguageCode
 from app.domain.models import WorkflowId
 
 router = Router(name=__name__)
@@ -31,9 +31,13 @@ async def show_language_picker(
     *,
     stage: WorkflowStage = WorkflowStage.CHOOSING_SUBTITLE,
     edit: bool = False,
+    matches: tuple[LanguageCode, ...] | None = None,
 ) -> None:
     await render_panel(
-        message, ui("picker"), language_keyboard(workflow_id, stage=stage), edit=edit
+        message,
+        ui("picker") if matches != () else ui("language_not_found"),
+        language_keyboard(workflow_id, stage=stage, matches=matches),
+        edit=edit,
     )
 
 
@@ -53,7 +57,7 @@ async def language_selected(callback: CallbackQuery, services: ApplicationServic
     parts = (callback.data or "").split(":")
     if (
         len(parts) != 3
-        or parts[-1] not in {"en", "fa"}
+        or parts[-1] not in {code.value for code in LanguageCode}
         or not isinstance(callback.message, Message)
     ):
         await answer_callback(callback, ui("stale"))
@@ -79,6 +83,30 @@ async def language_selected(callback: CallbackQuery, services: ApplicationServic
             await show_workflow(callback.message, services, callback.from_user.id, nav)
     except ApplicationError as error:
         await recover_workflow(callback, services, workflow, error)
+
+
+class LanguageSearchFilter(Filter):
+    async def __call__(self, message: Message, services: ApplicationServices) -> bool:
+        if not message.from_user or not message.text or message.text.startswith("/"):
+            return False
+        menu_keys = ("home_search", "home_language", "home_settings", "home_help", "home_about")
+        if message.text in {ui(key, locale) for key in menu_keys for locale in InterfaceLanguage}:
+            return False
+        return await services.choose_language.is_picker_open(message.from_user.id)
+
+
+@router.message(LanguageSearchFilter())
+async def language_search(message: Message, services: ApplicationServices) -> None:
+    assert message.from_user is not None and message.text is not None
+    try:
+        outcome, matches = await services.choose_language.filter_picker(
+            message.from_user.id, message.text
+        )
+        await show_language_picker(
+            message, str(outcome.workflow_id), stage=outcome.stage, matches=matches
+        )
+    except ApplicationError as error:
+        await message.answer(present_error(error))
 
 
 @router.message(Command("cancel"))

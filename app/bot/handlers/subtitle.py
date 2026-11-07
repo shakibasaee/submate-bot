@@ -109,7 +109,12 @@ async def subtitle_selected(callback: CallbackQuery, services: ApplicationServic
                     message, page, title="this title", language=page.language, edit=True
                 )
             elif action == "language":
-                await show_language_picker(message, str(page.workflow_id), edit=True)
+                picker = await services.choose_language.open_picker(
+                    callback.from_user.id, page.workflow_id
+                )
+                await show_language_picker(
+                    message, str(picker.workflow_id), stage=picker.stage, edit=True
+                )
             else:
                 result = await services.start_search.execute(
                     callback.from_user.id, page.workflow_id

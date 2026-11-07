@@ -73,17 +73,10 @@ def test_first_start_chooses_only_interface_then_personalizes_and_reuses_saved_l
         selection = callback(original, panel, user("Alice <&>"))
         await interface_selected(selection, app.services)
         welcome = panel.answer.await_args.args[0]
-        assert welcome.startswith(
-            "Hi Alice &lt;&amp;&gt; 👋"
-            if interface is InterfaceLanguage.ENGLISH
-            else "سلام Alice &lt;&amp;&gt; 👋"
-        )
+        greeting = {"en": "Hi", "fa": "سلام", "de": "Hallo", "ru": "Привет,"}[interface]
+        assert welcome.startswith(f"{greeting} Alice &lt;&amp;&gt; 👋")
         assert "Bot display name" not in welcome and "Original name" not in welcome
-        assert (
-            "Welcome to SubMate!"
-            if interface is InterfaceLanguage.ENGLISH
-            else "به SubMate خوش اومدی!"
-        ) in welcome
+        assert ui("welcome", interface) in welcome
         keyboard = panel.answer.await_args.kwargs["reply_markup"]
         assert keyboard.is_persistent and len(keyboard.keyboard) == 2
         assert keyboard.keyboard[0][0].text == ui("home_search", interface)
@@ -97,9 +90,7 @@ def test_first_start_chooses_only_interface_then_personalizes_and_reuses_saved_l
         later = message()
         later.from_user = user("Mina")
         await start_command(later, app.services)
-        assert later.answer.await_args.args[0].startswith(
-            "Hi Mina" if interface is InterfaceLanguage.ENGLISH else "سلام Mina"
-        )
+        assert later.answer.await_args.args[0].startswith(f"{greeting} Mina")
         assert later.answer.await_args.kwargs["reply_markup"].is_persistent
         assert "Choose your interface language" not in later.answer.await_args.args[0]
         assert await app.preferences.get_language(1) is subtitle
@@ -113,9 +104,7 @@ def test_unusable_display_names_have_generic_welcomes(name):
     for interface in InterfaceLanguage:
         with interface_locale(interface):
             text = welcome_text(name, None)
-            assert text.startswith(
-                "Hi 👋\n" if interface is InterfaceLanguage.ENGLISH else "سلام 👋\n"
-            )
+            assert text.startswith(ui("greeting", interface) + "\n")
             assert "None" not in text and "{first_name}" not in text
 
 
@@ -292,7 +281,7 @@ def test_english_interface_routes_old_persian_home_labels_and_localizes_subtitle
             await home_action(panel, app.services)
             assert panel.answer.await_args.args[0] == "Send the name of a movie or TV series."
             await language_command(panel, app.services)
-            assert panel.answer.await_args.args[0] == "Choose your subtitle language:"
+            assert panel.answer.await_args.args[0].startswith("Choose your subtitle language")
             await help_command(panel)
             assert "Interface language" in panel.answer.await_args.args[0]
             await about_command(panel)

@@ -45,6 +45,7 @@ class Conversation:
     episode_offset: int = 0
     download_started: bool = False
     interface_picker_id: str | None = None
+    subtitle_picker_open: bool = False
     pending_delivery: tuple[ProviderId, int] | None = None
 
     def evolve(self, **changes: object) -> "Conversation":

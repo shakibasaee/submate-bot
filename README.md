@@ -6,7 +6,7 @@
 
 Find a title, choose a subtitle language, and receive a validated SRT file.
 For series, select the season and episode before choosing a subtitle version.
-SubMate supports English and Persian interfaces, remembers language preferences,
+SubMate supports English, Persian, German, and Russian interfaces, remembers language preferences,
 and provides recovery actions when a download fails.
 
 [![Quality on main](https://github.com/shakibasaee/submate-bot/actions/workflows/quality.yml/badge.svg?branch=main)](https://github.com/shakibasaee/submate-bot/actions/workflows/quality.yml)
@@ -26,7 +26,8 @@ and provides recovery actions when a download fails.
   nothing, SubMate tries one shorter prefix and shows only similar TMDb titles.
 - Navigate titles, seasons, episodes, and subtitle versions with inline buttons,
   Back controls, and pagination.
-- Choose **English** or **فارسی** for the interface independently of subtitle language.
+- Choose **English**, **فارسی**, **Deutsch**, or **Русский** for the interface
+  independently of subtitle language.
 - Review available release names, language, format, hearing-impaired and forced
   flags, and provider-supplied ratings or download counts. Missing metadata is omitted.
 - Receive SRT documents with movie-year or `SxxExx` identifiers in their filenames.
@@ -45,7 +46,7 @@ The following are recorded observations, not a live uptime indicator.
 
 | Area | Last recorded evidence |
 | --- | --- |
-| Automated checks | **220 tests passed**, plus dependency, lint, formatting, and type checks on Python 3.13; recorded 2026-11-06. |
+| Automated checks | **295 tests passed**, plus lint and type checks on Python 3.13; recorded 2026-11-07. |
 | Live provider downloads | Inception (2010) and Breaking Bad S01E01 SRTs downloaded from SubDL and validated in memory on 2026-10-28. |
 | Later connectivity check | Telegram and TMDb connection attempts failed on 2026-10-29. This did not establish invalid credentials. |
 | Title suggestions and season ZIP | Automated tests cover close matches, complete and incomplete packs, repeated clicks, and ambiguous uploads. The 2026-11-05 live attempt could not reach Telegram or complete TMDb verification; no live ZIP delivery was verified. |
@@ -177,6 +178,24 @@ After the ZIP arrives, use the buttons immediately below it to return to
 episodes or seasons, change subtitle language, or start another search.
 
 ## Navigation and recovery
+
+### Find your language
+
+On first `/start`, choose the interface language or type its native/English name.
+For example, typing `Русский`, `Russian`, or `روسی` filters the choices to Russian.
+`/settings` opens this picker again.
+
+In **Subtitle language**, choose a button or type a language name or code such as
+`العربية`, `عربی`, `Deutsch`, or `de`. Available subtitle languages are Persian,
+English, Arabic, Turkish, Spanish, French, German, Italian, Portuguese, and Russian.
+Finding a language does not select it automatically; tap the matching button.
+Use **New search** to leave the picker and enter a movie title.
+
+Persian/Arabic letter variants and diacritics are normalized in language search;
+Persian title input also normalizes Arabic yeh/kaf and extra spacing. Native-title
+search still depends on the aliases available from TMDb. New language choices
+survive restarts with SQLite or PostgreSQL; existing preference tables are migrated
+at startup. File availability and season-pack completeness depend on the provider.
 
 Selections appear below the current message. Where Telegram permits editing,
 processing, results, and errors update that panel rather than adding status messages.
@@ -360,7 +379,8 @@ must not be reported as proof of live delivery.
 
 ## Limitations and privacy
 
-- English and Persian are the selectable interface and subtitle languages.
+- Four interface languages and ten subtitle languages are selectable; available
+  files and translations are supplied by the configured subtitle provider.
 - TV Specials (Season 0) are excluded. Availability depends on the provider.
 - SRT content must pass structural and safety checks and stay within **2 MiB**.
   Incoming archives, unsupported content, unsafe control characters/markup, and undecodable

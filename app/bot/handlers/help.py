@@ -7,6 +7,7 @@ from aiogram.types import InlineKeyboardMarkup, Message
 from app.bot.keyboards.common import button
 from app.bot.keyboards.home import home_keyboard
 from app.bot.localization import current_interface_language
+from app.bot.texts import ui
 from app.domain.languages import InterfaceLanguage
 
 router = Router(name=__name__)
@@ -34,7 +35,7 @@ HELP_EN = (
 ABOUT_FA = (
     "SubMate\n"
     "جست‌وجوی زیرنویس فیلم و سریال با اطلاعات TMDb و ارائه‌دهندهٔ تنظیم‌شده.\n"
-    "زیرنویس فارسی و انگلیسی با بررسی محتوای SRT.\n"
+    "ده زبان زیرنویس با بررسی محتوای SRT؛ زبان را با نام فارسی یا اصلی جست‌وجو کنید.\n"
     "زبان رابط و زبان زیرنویس جداگانه انتخاب و ذخیره می‌شوند.\n"
     "دسترسی به نسخه‌ها و سهمیه به ارائه‌دهنده بستگی دارد.\n"
     "حقوق زیرنویس متعلق به نویسندگان آن است."
@@ -42,7 +43,7 @@ ABOUT_FA = (
 ABOUT_EN = (
     "SubMate\n"
     "Find movie and TV subtitles using TMDb and the configured subtitle provider.\n"
-    "English and Persian subtitles with SRT validation.\n"
+    "Ten subtitle languages with SRT validation and language-name search.\n"
     "Interface and subtitle languages are separate preferences.\n"
     "Availability and quotas depend on the provider.\n"
     "Subtitle rights belong to their respective authors."
@@ -52,7 +53,13 @@ ABOUT_EN = (
 @router.message(Command("help"))
 async def help_command(message: Message) -> None:
     await message.answer(
-        HELP_EN if current_interface_language() is InterfaceLanguage.ENGLISH else HELP_FA,
+        (
+            ui("help_text")
+            if current_interface_language() in {InterfaceLanguage.GERMAN, InterfaceLanguage.RUSSIAN}
+            else HELP_EN
+            if current_interface_language() is InterfaceLanguage.ENGLISH
+            else HELP_FA
+        ),
         reply_markup=home_keyboard(),
     )
 
@@ -60,6 +67,12 @@ async def help_command(message: Message) -> None:
 @router.message(Command("about"))
 async def about_command(message: Message) -> None:
     await message.answer(
-        ABOUT_EN if current_interface_language() is InterfaceLanguage.ENGLISH else ABOUT_FA,
+        (
+            ui("about_text")
+            if current_interface_language() in {InterfaceLanguage.GERMAN, InterfaceLanguage.RUSSIAN}
+            else ABOUT_EN
+            if current_interface_language() is InterfaceLanguage.ENGLISH
+            else ABOUT_FA
+        ),
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[button("settings", "settings:open")]]),
     )

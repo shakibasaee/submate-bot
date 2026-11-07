@@ -20,8 +20,26 @@ class SqlitePreferenceRepository:
         )
         connection.execute(
             "CREATE TABLE IF NOT EXISTS interface_preferences "
-            "(user_id INTEGER PRIMARY KEY, language TEXT NOT NULL CHECK(language IN ('en', 'fa')))"
+            "(user_id INTEGER PRIMARY KEY, "
+            "language TEXT NOT NULL CHECK(language IN ('en', 'fa', 'de', 'ru')))"
         )
+        schema = connection.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='interface_preferences'"
+        ).fetchone()[0]
+        if "'de'" not in schema:
+            with connection:
+                connection.execute("BEGIN")
+                connection.execute(
+                    "ALTER TABLE interface_preferences RENAME TO old_interface_preferences"
+                )
+                connection.execute(
+                    "CREATE TABLE interface_preferences (user_id INTEGER PRIMARY KEY, "
+                    "language TEXT NOT NULL CHECK(language IN ('en', 'fa', 'de', 'ru')))"
+                )
+                connection.execute(
+                    "INSERT INTO interface_preferences SELECT * FROM old_interface_preferences"
+                )
+                connection.execute("DROP TABLE old_interface_preferences")
         return connection
 
     def _get(self, user_id: int) -> LanguageCode | None:
@@ -58,7 +76,11 @@ class SqlitePreferenceRepository:
             row = connection.execute(
                 "SELECT language FROM interface_preferences WHERE user_id = ?", (user_id,)
             ).fetchone()
-            return InterfaceLanguage(row[0]) if row and row[0] in {"en", "fa"} else None
+            return (
+                InterfaceLanguage(row[0])
+                if row and row[0] in {code.value for code in InterfaceLanguage}
+                else None
+            )
         finally:
             connection.close()
 

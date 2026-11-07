@@ -1,7 +1,8 @@
 """Interface text selected independently of subtitle preferences."""
 
 from app.bot.localization import current_interface_language
-from app.domain.languages import InterfaceLanguage, LanguageCode
+from app.bot.translations_de_ru import TRANSLATIONS
+from app.domain.languages import LANGUAGE_NAMES, InterfaceLanguage, LanguageCode
 
 TEXTS = {
     "similar_titles": (
@@ -91,7 +92,16 @@ TEXTS = {
         "نسخهٔ قابل استفاده‌ای باقی نمانده است. گزینهٔ دیگری را انتخاب کنید.",
     ),
     "title": ("Send the name of a movie or TV series.", "نام فیلم یا سریال را بفرستید."),
-    "picker": ("Choose your subtitle language:", "زبان زیرنویس را انتخاب کنید:"),
+    "picker": (
+        "Choose your subtitle language, or type its name (e.g. Arabic or العربية). "
+        "For a movie title, choose New search.",
+        "زبان زیرنویس را انتخاب کنید یا نامش را بنویسید؛ مثلاً فارسی، عربی یا ترکی. "
+        "برای نوشتن نام فیلم، «جست‌وجوی جدید» را بزنید.",
+    ),
+    "language_not_found": (
+        "No supported language matched. Try its native name, English name, or code (e.g. ar).",
+        "این زبان در فهرست پیدا نشد. نام فارسی، نام اصلی یا کد آن را امتحان کنید؛ مثلاً ar.",
+    ),
     "sent": ("Subtitle sent. What next?", "زیرنویس ارسال شد. مرحلهٔ بعد را انتخاب کنید."),
     "upload": (
         "Telegram could not confirm file delivery. Check the chat before retrying.",
@@ -194,12 +204,12 @@ TEXTS = {
 
 def ui(key: str, interface_language: InterfaceLanguage | None = None) -> str:
     language = interface_language or current_interface_language()
+    if language in {InterfaceLanguage.GERMAN, InterfaceLanguage.RUSSIAN}:
+        return TRANSLATIONS[key][0 if language is InterfaceLanguage.GERMAN else 1]
     return TEXTS[key][1 if language is InterfaceLanguage.PERSIAN else 0]
 
 
 def subtitle_language_label(language: LanguageCode | None) -> str:
     if language is None:
         return ui("not_set")
-    return {LanguageCode.ENGLISH: "English", LanguageCode.PERSIAN: "فارسی"}.get(
-        language, ui("not_set")
-    )
+    return LANGUAGE_NAMES[language][0]

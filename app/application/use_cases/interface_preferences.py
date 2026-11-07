@@ -7,7 +7,7 @@ from app.application.ports.conversations import ConversationRepository
 from app.application.ports.locks import UserLockManager
 from app.application.ports.preferences import PreferenceRepository
 from app.domain.errors import PreferenceUnavailableError, WorkflowExpiredError
-from app.domain.languages import InterfaceLanguage
+from app.domain.languages import InterfaceLanguage, find_languages
 
 
 class InterfacePreferences:
@@ -51,5 +51,29 @@ class InterfacePreferences:
                 await self._preferences.set_interface_language(user_id, language)
             except Exception:
                 raise PreferenceUnavailableError("Preferences could not be saved.") from None
-            await self._conversations.save(current.evolve(interface_picker_id=None))
+            await self._conversations.save(
+                current.evolve(interface_picker_id=None, subtitle_picker_open=False)
+            )
             return InterfaceChoiceOutcome(language, subtitle)
+
+    async def is_picker_open(self, user_id: int) -> bool:
+        async with self._locks.hold(user_id):
+            return (await self._conversations.get(user_id)).interface_picker_id is not None
+
+    async def filter_picker(
+        self, user_id: int, query: str
+    ) -> tuple[InterfaceChoiceOutcome, tuple[InterfaceLanguage, ...]]:
+        async with self._locks.hold(user_id):
+            current = await self._conversations.get(user_id)
+            if current.interface_picker_id is None:
+                raise WorkflowExpiredError("Interface picker expired.")
+            picker_id = uuid4().hex
+            await self._conversations.save(current.evolve(interface_picker_id=picker_id))
+            matches = tuple(
+                InterfaceLanguage(code.value)
+                for code in find_languages(query[:80])
+                if code.value in {locale.value for locale in InterfaceLanguage}
+            )
+            return InterfaceChoiceOutcome(
+                await self.get(user_id), current.language, picker_id
+            ), matches

@@ -11,7 +11,7 @@ from app.application.ports.conversations import ConversationRepository
 from app.application.ports.locks import UserLockManager
 from app.application.ports.preferences import PreferenceRepository
 from app.domain.errors import WorkflowExpiredError
-from app.domain.languages import LanguageCode
+from app.domain.languages import LanguageCode, find_languages
 from app.domain.models import WorkflowId
 
 
@@ -74,7 +74,9 @@ class ChooseLanguage:
                 WorkflowStage.CHOOSING_TITLE,
             }:
                 conversation = await self._conversations.reset_workflow(user_id)
-            updated = conversation.evolve(workflow_id=WorkflowId(uuid4().hex), recovery_from=None)
+            updated = conversation.evolve(
+                workflow_id=WorkflowId(uuid4().hex), recovery_from=None, subtitle_picker_open=True
+            )
             await self._conversations.save(updated)
             return LanguageSelectedOutcome(
                 updated.workflow_id, updated.language or LanguageCode.ENGLISH, updated.stage
@@ -101,6 +103,7 @@ class ChooseLanguage:
             ):
                 raise WorkflowExpiredError("That language picker expired. Use /language.")
             await self._preferences.set_language(user_id, language)
+            conversation = conversation.evolve(subtitle_picker_open=False)
             workflow_id = WorkflowId(uuid4().hex)
             if expected_workflow is not None and conversation.stage in {
                 WorkflowStage.CHOOSING_SUBTITLE,
@@ -140,3 +143,26 @@ class ChooseLanguage:
                 )
             )
         return LanguageSelectedOutcome(workflow_id, language)
+
+    async def is_picker_open(self, user_id: int) -> bool:
+        async with self._locks.hold(user_id):
+            return (await self._conversations.get(user_id)).subtitle_picker_open
+
+    async def filter_picker(
+        self, user_id: int, query: str
+    ) -> tuple[LanguageSelectedOutcome, tuple[LanguageCode, ...]]:
+        async with self._locks.hold(user_id):
+            current = await self._conversations.get(user_id)
+            if not current.subtitle_picker_open or current.stage in {
+                WorkflowStage.DELIVERING,
+                WorkflowStage.CONFIRMING_DELIVERY,
+            }:
+                raise WorkflowExpiredError("This language search expired.")
+            updated = current.evolve(workflow_id=WorkflowId(uuid4().hex), recovery_from=None)
+            await self._conversations.save(updated)
+            return (
+                LanguageSelectedOutcome(
+                    updated.workflow_id, updated.language or LanguageCode.ENGLISH, updated.stage
+                ),
+                find_languages(query[:80]),
+            )

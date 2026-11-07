@@ -1,6 +1,7 @@
 """Validated metadata title search."""
 
 import re
+import unicodedata
 from difflib import SequenceMatcher
 
 from app.application.dto import SearchTitlesOutcome, WorkflowStage
@@ -35,7 +36,9 @@ class SearchTitles:
         self._global_limit = global_limit
 
     async def execute(self, user_id: int, query: str) -> SearchTitlesOutcome:
-        normalized = " ".join(query.split())
+        normalized = unicodedata.normalize("NFKC", query)
+        normalized = normalized.translate(str.maketrans({"ي": "ی", "ك": "ک", "\u200c": " "}))
+        normalized = " ".join(normalized.split())
         if len(normalized) < 2:
             raise InvalidInputError("Please enter at least 2 characters for the title.")
         async with self._locks.hold(user_id):

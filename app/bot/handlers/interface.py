@@ -1,7 +1,7 @@
 """Interface onboarding and settings, driven only by explicit user actions."""
 
 from aiogram import F, Router
-from aiogram.filters import Command
+from aiogram.filters import Command, Filter
 from aiogram.types import CallbackQuery, Message
 
 from app.application.container import ApplicationServices
@@ -16,7 +16,11 @@ from app.domain.errors import ApplicationError, WorkflowExpiredError
 from app.domain.languages import InterfaceLanguage
 
 router = Router(name=__name__)
-FIRST_INTERFACE_PROMPT = "زبان رابط را انتخاب کنید:\nChoose your interface language:"
+FIRST_INTERFACE_PROMPT = (
+    "زبان رابط را انتخاب کنید یا نامش را بنویسید.\n"
+    "Choose your interface language or type its name:\n"
+    "فارسی · English · Deutsch · Русский"
+)
 
 
 async def show_interface_picker(
@@ -55,7 +59,11 @@ async def interface_selected(
     callback: CallbackQuery, services: ApplicationServices, demo_mode: bool = False
 ) -> None:
     parts = (callback.data or "").split(":")
-    if len(parts) != 3 or parts[2] not in {"en", "fa"} or not isinstance(callback.message, Message):
+    if (
+        len(parts) != 3
+        or parts[2] not in {code.value for code in InterfaceLanguage}
+        or not isinstance(callback.message, Message)
+    ):
         await answer_callback(callback, ui("interface_stale"))
         return
     try:
@@ -82,3 +90,30 @@ async def interface_selected(
             ),
             reply_markup=home_keyboard(),
         )
+
+
+class InterfaceSearchFilter(Filter):
+    async def __call__(self, message: Message, services: ApplicationServices) -> bool:
+        if not message.from_user or not message.text or message.text.startswith("/"):
+            return False
+        keys = ("home_search", "home_language", "home_settings", "home_help", "home_about")
+        if message.text in {ui(key, locale) for key in keys for locale in InterfaceLanguage}:
+            return False
+        return await services.interface_preferences.is_picker_open(message.from_user.id)
+
+
+@router.message(InterfaceSearchFilter())
+async def interface_search(message: Message, services: ApplicationServices) -> None:
+    assert message.from_user is not None and message.text is not None
+    try:
+        outcome, matches = await services.interface_preferences.filter_picker(
+            message.from_user.id, message.text
+        )
+        assert outcome.picker_id is not None
+        await render_panel(
+            message,
+            ui("interface_picker") if matches else ui("language_not_found"),
+            interface_keyboard(outcome.picker_id, matches),
+        )
+    except ApplicationError as error:
+        await message.answer(present_error(error))

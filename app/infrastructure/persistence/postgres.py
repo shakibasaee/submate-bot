@@ -13,6 +13,12 @@ CREATE TABLE IF NOT EXISTS user_preferences (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 )
 """
+SUBTITLE_CODES = ", ".join(f"'{code.value}'" for code in LanguageCode)
+PREFERENCE_SCHEMA += f"""
+; ALTER TABLE user_preferences DROP CONSTRAINT IF EXISTS user_preferences_subtitle_language_check;
+ALTER TABLE user_preferences ADD CONSTRAINT user_preferences_subtitle_language_check
+CHECK (subtitle_language IN ({SUBTITLE_CODES}));
+"""
 
 INTERFACE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS user_interface_preferences (
@@ -20,6 +26,13 @@ CREATE TABLE IF NOT EXISTS user_interface_preferences (
     interface_language VARCHAR(8) NOT NULL CHECK (interface_language IN ('en', 'fa')),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 )
+"""
+INTERFACE_SCHEMA += """
+; ALTER TABLE user_interface_preferences
+DROP CONSTRAINT IF EXISTS user_interface_preferences_interface_language_check;
+ALTER TABLE user_interface_preferences
+ADD CONSTRAINT user_interface_preferences_interface_language_check
+CHECK (interface_language IN ('en', 'fa', 'de', 'ru'));
 """
 
 
@@ -81,7 +94,7 @@ class PostgresPreferenceRepository:
                     (user_id,),
                 )
                 row = await cursor.fetchone()
-            if row and row[0] in {"en", "fa"}:
+            if row and row[0] in {code.value for code in InterfaceLanguage}:
                 language = InterfaceLanguage(str(row[0]))
                 await self._fallback.set_interface_language(user_id, language)
                 return language

@@ -26,7 +26,7 @@ TRANSLATIONS = {
         "Telegram не подтвердил отправку ZIP. Сначала проверьте чат.",
     ),
     "home_settings": ("⚙️ Einstellungen", "⚙️ Настройки"),
-    "uploader": ("Hochgeladen von", "Автор загрузки"),
+    "source": ("Quelle", "Источник"),
     "received": ("Datei erhalten", "Файл получен"),
     "resend_confirm": ("Nicht erhalten – erneut senden", "Не получен — отправить снова"),
     "receipt_resolved": (

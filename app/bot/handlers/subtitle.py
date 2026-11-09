@@ -20,6 +20,11 @@ from app.domain.subtitles import ProviderId
 
 router = Router(name=__name__)
 logger = structlog.get_logger(__name__)
+SOURCE_NAMES = {
+    "subdl": "SubDL",
+    "opensubtitles": "OpenSubtitles.com",
+    "demo": "SubMate (DEMO)",
+}
 
 
 async def download_error(
@@ -170,11 +175,11 @@ async def subtitle_selected(callback: CallbackQuery, services: ApplicationServic
         await services.deliver_subtitle.restore(callback.from_user.id, workflow)
         raise
     subtitle = outcome.subtitle
-    uploader = f"\n{ui('uploader')}: {subtitle.uploader}" if subtitle.uploader else ""
+    source = SOURCE_NAMES.get(attempt.candidate.provider_id, subtitle.attribution)
     try:
         await message.answer_document(
             BufferedInputFile(subtitle.content, filename=subtitle.filename),
-            caption=safe_caption(f"{subtitle.attribution}{uploader}"),
+            caption=safe_caption(f"{ui('source')}: {source}") if source else None,
         )
     except (TelegramAPIError, TimeoutError) as error:
         uncertain = isinstance(error, (TelegramNetworkError, TelegramServerError, TimeoutError))

@@ -397,6 +397,6 @@ must not be reported as proof of live delivery.
 - Logs redact recognized credentials, identifiers, and download URLs. Keep `.env`,
   logs, databases, and downloaded subtitle files out of Git.
 
-Subtitles belong to their authors. Provider and uploader attribution are included
-when available. Review [SECURITY.md](SECURITY.md) for operator responsibilities and
+Subtitles belong to their authors. File captions identify the subtitle source.
+Review [SECURITY.md](SECURITY.md) for operator responsibilities and
 [DEPLOYMENT.md](DEPLOYMENT.md) before operating an externally hosted instance.

@@ -1,5 +1,16 @@
 # SubMate verification evidence
 
+## Season ZIP recovery — 2026-11-09
+
+- 298 automated tests passed; dependency, lint, formatting and type checks passed.
+- Exact title results precede similarly named matches; the user still chooses the title.
+- A season ZIP prefers a single complete pack and can use matching raw episode files
+  from separate releases. Tests confirm that incomplete coverage shows a count and
+  requires explicit partial consent, duplicate clicks upload once, and no matching
+  files cannot produce an empty ZIP.
+- The live JoJo coverage probe returned a TMDb metadata error, and Telegram returned
+  a connection error. No live ZIP delivery or JoJo coverage was verified by this run.
+
 ## Multilingual update — 2026-11-07
 
 - 295 tests passed; dependency validation, lint, formatting, and type checks passed.

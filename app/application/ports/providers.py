@@ -4,7 +4,13 @@ from typing import Protocol
 
 from app.domain.languages import LanguageCode
 from app.domain.models import SeriesRef
-from app.domain.subtitles import DownloadedSubtitle, ProviderId, SubtitleCandidate, SubtitleQuery
+from app.domain.subtitles import (
+    DownloadedSubtitle,
+    ProviderFileRef,
+    ProviderId,
+    SubtitleCandidate,
+    SubtitleQuery,
+)
 
 
 class SubtitleProvider(Protocol):
@@ -18,5 +24,12 @@ class SubtitleProvider(Protocol):
 
 class SeasonPackProvider(SubtitleProvider, Protocol):
     async def search_season(
-        self, series: SeriesRef, season: int, language: LanguageCode, episodes: frozenset[int]
+        self,
+        series: SeriesRef,
+        season: int,
+        language: LanguageCode,
+        episodes: frozenset[int],
+        *,
+        combine: bool = False,
+        excluded: frozenset[ProviderFileRef] = frozenset(),
     ) -> dict[int, SubtitleCandidate]: ...

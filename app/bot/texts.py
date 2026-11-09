@@ -10,6 +10,17 @@ TEXTS = {
         "نتیجهٔ دقیقی پیدا نشد. منظورتان یکی از این عنوان‌هاست؟",
     ),
     "season_pack": ("Download season ZIP", "دانلود ZIP فصل"),
+    "season_pack_partial": ("Download available episodes", "دانلود قسمت‌های موجود"),
+    "season_pack_coverage": (
+        "Found SRT files for {count} of {total} episodes. Download the available files "
+        "as a partial ZIP, pick an episode, or change language.",
+        "برای {count} از {total} قسمت فایل SRT پیدا شد. می‌توانید ZIP ناقص را بگیرید، "
+        "یک قسمت انتخاب کنید یا زبان را تغییر دهید.",
+    ),
+    "season_pack_partial_ready": (
+        "Partial ZIP · Season {season} · {count}/{total} episodes · {language}\nSource: SubDL",
+        "ZIP ناقص · فصل {season} · {count} از {total} قسمت · {language}\nمنبع: SubDL",
+    ),
     "season_pack_sent": ("Season ZIP sent.", "فایل ZIP فصل ارسال شد."),
     "season_pack_next": ("What would you like to do next?", "می‌خواهید بعدش چه کار کنید؟"),
     "season_pack_back_episodes": ("⬅️ Back to episodes", "⬅️ برگشت به قسمت‌ها"),

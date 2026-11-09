@@ -87,7 +87,7 @@ def test_provider_does_not_treat_partial_or_mismatched_sets_as_a_full_pack(overr
     assert session.requests[0].kwargs["params"]["full_season"] == "1"
 
 
-async def setup_pack(*, complete=True):
+async def setup_pack(responses=None):
     app = build_test_application()
     initial = (await app.conversations.get(1)).evolve(
         stage=WorkflowStage.CHOOSING_EPISODE,
@@ -97,8 +97,10 @@ async def setup_pack(*, complete=True):
     )
     await app.conversations.save(initial)
     session = FakeSession(
-        gets=[
-            FakeResponse(payload=season_payload(complete=complete)),
+        gets=responses
+        if responses is not None
+        else [
+            FakeResponse(payload=season_payload()),
             FakeResponse(body=VALID_SRT),
             FakeResponse(body=VALID_SRT),
         ]
@@ -177,13 +179,89 @@ def test_generic_season_names_are_shown_once_and_real_names_are_kept(locale):
     assert markup.inline_keyboard[0][0].callback_data == "season:fixture:1"
 
 
-def test_incomplete_pack_does_not_download_or_upload_any_files():
+def test_partial_zip_requires_explicit_confirmation_and_labels_actual_coverage():
     async def scenario():
-        _, service, initial, session = await setup_pack(complete=False)
+        app, service, initial, session = await setup_pack(
+            [
+                FakeResponse(payload=season_payload(complete=False)),
+                FakeResponse(payload=season_payload(complete=False)),
+                FakeResponse(payload=season_payload(complete=False)),
+                FakeResponse(body=VALID_SRT),
+            ]
+        )
+        services = replace(app.services, download_season=service)
+        panel = message()
+        with interface_locale(InterfaceLanguage.ENGLISH):
+            await season_pack_selected(click(f"pack:{initial.workflow_id}", panel), services)
+            panel.answer_document.assert_not_awaited()
+            assert "1 of 2 episodes" in panel.edit_text.await_args.args[0]
+            assert len(session.requests) == 2
+            assert not any(b.text == ui("season_pack") for b in buttons(panel))
+            partial = next(
+                b.callback_data for b in buttons(panel) if b.text == ui("season_pack_partial")
+            )
+            await asyncio.gather(
+                season_pack_selected(click(partial, panel), services),
+                season_pack_selected(click(partial, panel), services),
+            )
+            panel.answer_document.assert_awaited_once()
+            upload = panel.answer_document.await_args.args[0]
+            assert upload.filename.endswith("-partial.zip")
+            assert "Partial ZIP" in panel.answer_document.await_args.kwargs["caption"]
+            with ZipFile(BytesIO(upload.data)) as archive:
+                assert archive.namelist() == ["S01E01-en.srt"]
+            assert len(session.requests) == 4
+
+    asyncio.run(scenario())
+
+
+def test_pack_assembles_complete_coverage_from_separate_provider_rows():
+    async def scenario():
+        combined = season_payload()
+        files = combined["subtitles"][0]["unpack_files"]
+        combined["subtitles"] = [{"unpack_files": [file]} for file in files]
+        _, service, initial, session = await setup_pack(
+            [
+                FakeResponse(payload=season_payload(complete=False)),
+                FakeResponse(payload=combined),
+                FakeResponse(body=VALID_SRT),
+                FakeResponse(body=VALID_SRT),
+            ]
+        )
         state = await service.claim(1, initial.workflow_id)
-        with pytest.raises(SeasonPackUnavailable):
-            await service.build(state)
+        archive = await service.build(state)
+        assert not archive.partial and archive.included == 2
+        with ZipFile(BytesIO(archive.content)) as result:
+            assert result.namelist() == ["S01E01-en.srt", "S01E02-en.srt"]
+        assert "full_season" not in session.requests[1].kwargs["params"]
         await service.finish(state)
+
+    asyncio.run(scenario())
+
+
+def test_missing_season_files_cannot_create_an_empty_partial_zip():
+    async def scenario():
+        wrong = season_payload(wrong_language=True)
+        wrong["subtitles"][0]["unpack_files"][0]["season"] = 2
+        _, service, initial, session = await setup_pack([FakeResponse(payload=wrong)])
+        state = await service.claim(1, initial.workflow_id)
+        with pytest.raises(SeasonPackUnavailable) as error:
+            await service.build(state, allow_partial=True)
+        assert error.value.available == 0 and error.value.expected == 2
         assert len(session.requests) == 1
+        await service.finish(state)
+
+    asyncio.run(scenario())
+
+
+def test_exact_series_match_is_listed_above_similar_titles():
+    async def scenario():
+        exact = MediaSearchResult("1", MediaType.TV, "The Boys", "2019")
+        similar = MediaSearchResult("2", MediaType.TV, "The Hardy Boys", "2020")
+        app = build_test_application(metadata=FakeMetadata(search_results=[similar, exact]))
+        await app.services.choose_language.execute(1, LANGUAGE)
+        results = await app.services.search_titles.execute(1, "tHe boys")
+        assert results.results == (exact, similar)
+        assert (await app.conversations.get(1)).selected_media is None
 
     asyncio.run(scenario())

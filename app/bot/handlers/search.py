@@ -111,7 +111,7 @@ async def season_selected(callback: CallbackQuery, services: ApplicationServices
         await recover_workflow(callback, services, workflow, error)
 
 
-@router.callback_query(F.data.startswith("pack:"))
+@router.callback_query(F.data.startswith("pack:") | F.data.startswith("packpartial:"))
 async def season_pack_selected(callback: CallbackQuery, services: ApplicationServices) -> None:
     service = services.download_season
     if service is None or not callback.data or not isinstance(callback.message, Message):
@@ -127,27 +127,41 @@ async def season_pack_selected(callback: CallbackQuery, services: ApplicationSer
     message = callback.message
     error_text = None
     uncertain = False
+    no_complete_pack = False
+    offer_partial = False
     try:
         await answer_callback(callback)
         with suppress(TelegramAPIError):
             await render_panel(message, ui("season_pack_working"), edit=True)
         try:
-            content = await service.build(state)
-        except SeasonPackUnavailable:
-            error_text = ui("season_pack_missing")
+            archive = await service.build(
+                state, allow_partial=callback.data.startswith("packpartial:")
+            )
+        except SeasonPackUnavailable as error:
+            no_complete_pack = True
+            offer_partial = error.available > 0
+            error_text = (
+                ui("season_pack_coverage").format(count=error.available, total=error.expected)
+                if offer_partial
+                else ui("season_pack_missing")
+            )
         except ApplicationError as error:
             error_text = present_error(error)
         else:
             season = state.episodes[0].season_number
+            suffix = "-partial" if archive.partial else ""
+            caption = "season_pack_partial_ready" if archive.partial else "season_pack_ready"
             try:
                 await message.answer_document(
                     BufferedInputFile(
-                        content, filename=f"SubMate-S{season:02d}-{state.language}.zip"
+                        archive.content,
+                        filename=f"SubMate-S{season:02d}-{state.language}{suffix}.zip",
                     ),
                     caption=safe_caption(
-                        ui("season_pack_ready").format(
+                        ui(caption).format(
                             season=season,
-                            count=len(state.episodes),
+                            count=archive.included,
+                            total=archive.expected,
                             language=subtitle_language_label(state.language),
                         )
                     ),
@@ -180,7 +194,8 @@ async def season_pack_selected(callback: CallbackQuery, services: ApplicationSer
         nav,
         edit=True,
         error=error_text,
-        season_pack_limit=0 if uncertain else service.max_episodes,
+        season_pack_limit=0 if uncertain or no_complete_pack else service.max_episodes,
+        partial_pack=offer_partial,
     )
 
 

@@ -59,7 +59,13 @@ class SearchTitles:
                 raise RateLimitedError(
                     "Title search is busy right now.", global_decision.retry_after
                 )
-            results = tuple(await self._metadata.search(normalized))
+            title_key = _title_key(normalized)
+            results = tuple(
+                sorted(
+                    await self._metadata.search(normalized),
+                    key=lambda result: _title_key(result.title) != title_key,
+                )
+            )
             suggested = False
             if not results:
                 prefix = _fallback_prefix(normalized)

@@ -6,6 +6,17 @@ TRANSLATIONS = {
         "Точного совпадения нет. Вы имели в виду один из этих вариантов?",
     ),
     "season_pack": ("Staffel als ZIP laden", "Скачать сезон ZIP"),
+    "season_pack_partial": ("Verfügbare Folgen laden", "Скачать доступные серии"),
+    "season_pack_coverage": (
+        "SRT für {count} von {total} Folgen gefunden. Laden Sie das Teil-ZIP, "
+        "wählen Sie eine Folge oder ändern Sie die Sprache.",
+        "SRT найдены для {count} из {total} серий. Скачайте неполный ZIP, "
+        "выберите серию или измените язык.",
+    ),
+    "season_pack_partial_ready": (
+        "Teil-ZIP · Staffel {season} · {count}/{total} Folgen · {language}\nQuelle: SubDL",
+        "Неполный ZIP · Сезон {season} · {count}/{total} серий · {language}\nИсточник: SubDL",
+    ),
     "season_pack_sent": ("Staffel-ZIP gesendet.", "ZIP сезона отправлен."),
     "season_pack_next": ("Wie möchten Sie fortfahren?", "Что хотите сделать дальше?"),
     "season_pack_back_episodes": ("⬅️ Zurück zu den Folgen", "⬅️ К списку серий"),

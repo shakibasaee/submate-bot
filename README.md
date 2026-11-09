@@ -46,7 +46,7 @@ The following are recorded observations, not a live uptime indicator.
 
 | Area | Last recorded evidence |
 | --- | --- |
-| Automated checks | **295 tests passed**, plus lint and type checks on Python 3.13; recorded 2026-11-07. |
+| Automated checks | **298 tests passed**, plus dependency, lint, formatting, and type checks on Python 3.13; recorded 2026-11-09. |
 | Live provider downloads | Inception (2010) and Breaking Bad S01E01 SRTs downloaded from SubDL and validated in memory on 2026-10-28. |
 | Later connectivity check | Telegram and TMDb connection attempts failed on 2026-10-29. This did not establish invalid credentials. |
 | Title suggestions and season ZIP | Automated tests cover close matches, complete and incomplete packs, repeated clicks, and ambiguous uploads. The 2026-11-05 live attempt could not reach Telegram or complete TMDb verification; no live ZIP delivery was verified. |
@@ -162,16 +162,21 @@ same computer; it cannot detect another host running the same bot.
 ### Download a whole season
 
 With SubDL configured, select a series and season, then choose **Download season
-ZIP** on the episode screen. SubMate requires one provider pack that covers every
-episode listed by TMDb in the selected subtitle language. It downloads and validates
-the individual SRTs, then builds a new ZIP with filenames such as `S01E02-en.srt`.
-It never extracts or forwards the provider's archive.
+ZIP** on the episode screen. SubMate prefers a single pack covering every episode
+listed by TMDb. If no such pack is available, it checks the season's individual SRT
+entries for the same title, episode, and subtitle language. These files may come
+from different releases, so video timing compatibility can vary.
+
+When only some episodes match, SubMate shows the coverage and offers **Download
+available episodes**. It sends a ZIP marked `-partial` only after that choice.
+Every included SRT is validated, with filenames such as `S01E02-en.srt`. SubMate
+never extracts or forwards the provider's archive.
 
 The option is available for seasons of up to 20 episodes (or the configured
 global download limit, if lower). Each file counts toward the shared download
 limit and provider usage; the bot allows two pack attempts per user per ten
-minutes and caps the combined SRT content at 8 MiB. If coverage is incomplete or a
-download fails, SubMate keeps the episode list available and sends no partial ZIP.
+minutes and caps the combined SRT content at 8 MiB. If no files match or a download
+fails, the episode list remains available and no ZIP is sent.
 Whole-series bundles, demo packs, and OpenSubtitles packs are not supported.
 
 After the ZIP arrives, use the buttons immediately below it to return to

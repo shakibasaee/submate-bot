@@ -1,6 +1,7 @@
-"""Build a bounded ZIP from a complete, provider-verified set of episode SRTs."""
+"""Build a bounded ZIP from matched episode SRTs with explicit partial consent."""
 
 import asyncio
+from dataclasses import dataclass
 from io import BytesIO
 from uuid import uuid4
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -18,14 +19,28 @@ from app.domain.errors import (
     WorkflowExpiredError,
 )
 from app.domain.models import SeriesRef, WorkflowId
-from app.domain.subtitles import ProviderFileRef, ProviderId
+from app.domain.subtitles import ProviderFileRef, ProviderId, SubtitleCandidate
 
 MAX_PACK_EPISODES = 20
 MAX_PACK_BYTES = 8 * 1024 * 1024
 
 
 class SeasonPackUnavailable(ProviderNotFoundError):
-    pass
+    def __init__(self, message: str, *, available: int = 0, expected: int = 0) -> None:
+        super().__init__(message)
+        self.available = available
+        self.expected = expected
+
+
+@dataclass(frozen=True, slots=True)
+class SeasonArchive:
+    content: bytes
+    included: int
+    expected: int
+
+    @property
+    def partial(self) -> bool:
+        return self.included < self.expected
 
 
 class DownloadSeason:
@@ -65,7 +80,7 @@ class DownloadSeason:
             await self._conversations.save(state)
             return state
 
-    async def build(self, state: Conversation) -> bytes:
+    async def build(self, state: Conversation, *, allow_partial: bool = False) -> SeasonArchive:
         assert isinstance(state.selected_media, SeriesRef) and state.language is not None
         season = state.episodes[0].season_number
         episodes = frozenset(item.episode_number for item in state.episodes)
@@ -80,18 +95,47 @@ class DownloadSeason:
             raise SeasonPackUnavailable("Episode coverage could not be confirmed.")
         try:
             async with asyncio.timeout(75):
-                candidates = await self._provider.search_season(
-                    state.selected_media, season, state.language, episodes
+                excluded = frozenset(
+                    ref
+                    for provider, ref in state.rejected_subtitles
+                    if provider == self._provider.provider_id
                 )
-                if candidates.keys() != episodes or any(
-                    (item.provider_id, item.provider_file_ref) in state.rejected_subtitles
-                    for item in candidates.values()
-                ):
-                    raise SeasonPackUnavailable("No complete pack is available.")
+                candidates: dict[int, SubtitleCandidate] = {}
+                if not allow_partial:
+                    candidates = self._usable(
+                        state,
+                        episodes,
+                        await self._provider.search_season(
+                            state.selected_media,
+                            season,
+                            state.language,
+                            episodes,
+                            excluded=excluded,
+                        ),
+                    )
+                if candidates.keys() != episodes:
+                    candidates = self._usable(
+                        state,
+                        episodes,
+                        await self._provider.search_season(
+                            state.selected_media,
+                            season,
+                            state.language,
+                            episodes,
+                            combine=True,
+                            excluded=excluded,
+                        ),
+                    )
+                if not candidates or (candidates.keys() != episodes and not allow_partial):
+                    raise SeasonPackUnavailable(
+                        "No complete pack is available.",
+                        available=len(candidates),
+                        expected=len(episodes),
+                    )
                 contents = BytesIO()
                 total = 0
                 with ZipFile(contents, "w", ZIP_DEFLATED) as archive:
-                    for episode in sorted(episodes):
+                    for episode in sorted(candidates):
                         decision = await self._limiter.check(
                             "global-subtitle-download", "all", self._global_limit, 60
                         )
@@ -111,9 +155,30 @@ class DownloadSeason:
                         archive.writestr(
                             f"S{season:02d}E{episode:02d}-{state.language}.srt", subtitle.content
                         )
-                return contents.getvalue()
+                return SeasonArchive(contents.getvalue(), len(candidates), len(episodes))
         except TimeoutError:
             raise ProviderTimeoutError("Season pack timed out.") from None
+
+    def _usable(
+        self,
+        state: Conversation,
+        episodes: frozenset[int],
+        candidates: dict[int, SubtitleCandidate],
+    ) -> dict[int, SubtitleCandidate]:
+        usable: dict[int, SubtitleCandidate] = {}
+        seen: set[ProviderFileRef] = set()
+        for number, item in candidates.items():
+            if (
+                number in episodes
+                and item.language is state.language
+                and item.provider_id == self._provider.provider_id
+                and item.format == "srt"
+                and item.provider_file_ref not in seen
+                and (item.provider_id, item.provider_file_ref) not in state.rejected_subtitles
+            ):
+                usable[number] = item
+                seen.add(item.provider_file_ref)
+        return usable
 
     async def _reject(
         self, state: Conversation, provider: ProviderId, file_ref: ProviderFileRef

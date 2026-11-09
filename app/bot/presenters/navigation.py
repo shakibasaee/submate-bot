@@ -17,6 +17,7 @@ async def send_navigation(
     error: str | None = None,
     retry_data: str | None = None,
     season_pack_limit: int = 0,
+    partial_pack: bool = False,
 ) -> None:
     if outcome.stage is WorkflowStage.CHOOSING_TITLE:
         text = ui("titles") if outcome.results else ui("no_titles")
@@ -30,7 +31,11 @@ async def send_navigation(
             episodes=outcome.episodes,
             offset=outcome.offset,
         )
-        if 0 < len(outcome.episodes) <= season_pack_limit:
+        if partial_pack:
+            markup.inline_keyboard.insert(
+                0, [button("season_pack_partial", f"packpartial:{outcome.workflow_id}")]
+            )
+        elif 0 < len(outcome.episodes) <= season_pack_limit:
             markup.inline_keyboard.insert(0, [button("season_pack", f"pack:{outcome.workflow_id}")])
     else:
         text = ui("seasons")

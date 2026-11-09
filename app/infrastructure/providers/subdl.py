@@ -122,7 +122,14 @@ class SubdlProvider:
         return await retry_async(operation, (ProviderUnavailableError,), attempts=3)
 
     async def search_season(
-        self, series: SeriesRef, season: int, language: LanguageCode, episodes: frozenset[int]
+        self,
+        series: SeriesRef,
+        season: int,
+        language: LanguageCode,
+        episodes: frozenset[int],
+        *,
+        combine: bool = False,
+        excluded: frozenset[ProviderFileRef] = frozenset(),
     ) -> dict[int, SubtitleCandidate]:
         params = {
             "api_key": self._api_key,
@@ -130,36 +137,46 @@ class SubdlProvider:
             "type": "tv",
             "season_number": str(season),
             "languages": str(language).upper(),
-            "full_season": "1",
             "unpack": "1",
             "subs_per_page": "30",
         }
+        if not combine:
+            params["full_season"] = "1"
 
         async def operation() -> dict[int, SubtitleCandidate]:
-            payload = await self._request_search(params)
+            try:
+                payload = await self._request_search(params)
+            except ProviderNotFoundError:
+                return {}
             if not self._matches_title(payload, series.external_id, "tv"):
                 return {}
+            candidates: dict[int, SubtitleCandidate] = {}
+            seen: set[ProviderFileRef] = set()
+            episode_numbers = {str(number): number for number in episodes}
             for pack in self._subtitle_rows(payload):
-                if not isinstance(pack, dict) or pack.get("full_season") is not True:
+                if not isinstance(pack, dict) or (
+                    not combine and pack.get("full_season") is not True
+                ):
                     continue
                 files = pack.get("unpack_files")
                 if not isinstance(files, list):
                     continue
-                candidates: dict[int, SubtitleCandidate] = {}
-                seen: set[ProviderFileRef] = set()
+                if not combine:
+                    candidates.clear()
+                    seen.clear()
                 for file in files:
                     if not isinstance(file, dict) or str(file.get("season")) != str(season):
                         continue
-                    number = next((n for n in episodes if str(n) == str(file.get("episode"))), None)
+                    number = episode_numbers.get(str(file.get("episode")))
                     if number is None or number in candidates:
                         continue
                     candidate = self._raw_candidate(file, pack, language)
-                    if candidate is not None and candidate.provider_file_ref not in seen:
+                    if candidate is not None and candidate.provider_file_ref not in seen | excluded:
                         candidates[number] = candidate
                         seen.add(candidate.provider_file_ref)
                 if candidates.keys() == episodes:
                     return candidates
-            return {}
+            return candidates if combine else {}
 
         return await retry_async(operation, (ProviderUnavailableError,), attempts=3)
 
